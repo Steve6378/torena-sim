@@ -1,5 +1,17 @@
 # honse-sim
 
+> **Modified fork.** Branch `ulc` is jalbarrang/torena-sim v0.13.0 plus the
+> Uma Legends Cup patch series, applied on 19 Sep 2026. Every change is its
+> own commit above upstream's v0.13.0 tag commit `52f4c4a` (`git log
+> 52f4c4a..ulc`; this fork carries no tags), and each
+> message carries the measurement that justified it. The series is
+> maintained as patch files in the tournament's repository
+> (Steve6378/uma-legends-cup, `sim-lab/engine-fork/patches/`); this branch
+> is regenerated from them and stamped `0.13.0+ulc.N`. The licence is
+> unchanged: GPL-3.0-only, see [LICENSE](LICENSE). Upstream is not
+> responsible for anything here; bug reports against upstream go to
+> upstream's issue tracker.
+
 `honse-sim` is a Rust workspace for deterministic Uma Musume: Pretty Derby race simulation. It contains the simulation engine and its WebAssembly adapter.
 
 ## Workspace
