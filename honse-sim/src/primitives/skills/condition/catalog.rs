@@ -208,15 +208,18 @@ impl Cond {
     /// Register one filter under both a non-strict comparison and its strict
     /// twin.
     ///
-    /// For conditions whose filter clips regions by a threshold on a quantity
-    /// that advances monotonically with course position (`distance_rate`,
-    /// `remain_distance`, the `*_continuetime` / `change_order_up_*` static
-    /// fallbacks): the strict and non-strict bounds differ by the single
-    /// threshold point, which a half-open `[start, end)` region cannot
-    /// distinguish, so the same clip serves both. Leaving the strict slot empty
-    /// is the one thing that must not happen: an unregistered comparison is
-    /// [`ConditionError::Unsupported`], and `build_skill_data` turns that into
-    /// "this skill has no triggers at all".
+    /// For conditions whose filter clips regions by a threshold on a *continuous*
+    /// quantity that advances monotonically with course position (`distance_rate`,
+    /// the `*_continuetime` / `change_order_up_*` static fallbacks): the strict
+    /// and non-strict bounds differ by the single threshold point, which a
+    /// half-open `[start, end)` region cannot distinguish, so the same clip
+    /// serves both. Do **not** reach for this on a quantity the game quantises
+    /// (`remain_distance`, whose meter-wide `eq` window shows the quantum): there
+    /// the two bounds differ by a whole step and each needs its own clip.
+    ///
+    /// Leaving the strict slot empty is the one thing that must not happen: an
+    /// unregistered comparison is [`ConditionError::Unsupported`], and
+    /// `build_skill_data` turns that into "this skill has no triggers at all".
     fn non_strict_and_strict<F>(mut self, non_strict: CmpKind, strict: CmpKind, f: F) -> Self
     where
         F: for<'a> Fn(&ConditionFilterParams<'a>) -> FilterResult + Send + Sync + 'static,
@@ -1602,8 +1605,21 @@ pub fn build_catalog() -> ConditionCatalog {
                 );
                 pass(p.regions.rmap(move |r| r.intersect(&bounds)))
             })
-            .lte_lt(|p| {
+            .lte(|p| {
                 let bounds = Region::new(p.course.distance - p.arg as f64, p.course.distance);
+                pass(p.regions.rmap(move |r| r.intersect(&bounds)))
+            })
+            .lt(|p| {
+                // `remain_distance` is quantised to whole meters: the doc computes
+                // it as the (integer) course distance minus the position rounded
+                // down, which is what the `eq` arm above spells out as the
+                // one-meter window `[distance - arg, distance - arg + 1)`. So the
+                // strict bound is NOT the non-strict one: `< arg` first holds a
+                // whole meter later, where the floor reads `arg - 1`. The `>` side
+                // needs no such shift — `> arg` is `>= arg + 1`, i.e. the floor
+                // must be strictly below `distance - arg`, which is exactly the
+                // half-open window the `>=` arm already clips to.
+                let bounds = Region::new(p.course.distance - p.arg as f64 + 1.0, p.course.distance);
                 pass(p.regions.rmap(move |r| r.intersect(&bounds)))
             })
             .gte_gt(|p| {
@@ -2489,10 +2505,19 @@ mod tests {
         assert_eq!(lt.0, vec![Region::new(0.0, 1200.0)]);
         let (gt, _) = apply("distance_rate>50");
         assert_eq!(gt.0, vec![Region::new(1200.0, 2400.0)]);
+        // `remain_distance` is the exception: it is quantised to whole meters
+        // (`remain_distance==500` is the one-meter window `[1900, 1901)`), so its
+        // strict bounds are a meter off the non-strict ones. `> 500` is `>= 501`,
+        // i.e. the floor below 1900 — the same clip. `< 500` is `<= 499`, which
+        // does not start until 1901.
         let (remain_gt, _) = apply("remain_distance>500");
         assert_eq!(remain_gt.0, vec![Region::new(0.0, 1900.0)]);
+        let (remain_eq, _) = apply("remain_distance==500");
+        assert_eq!(remain_eq.0, vec![Region::new(1900.0, 1901.0)]);
+        let (remain_lte, _) = apply("remain_distance<=500");
+        assert_eq!(remain_lte.0, vec![Region::new(1900.0, 2400.0)]);
         let (remain_lt, _) = apply("remain_distance<500");
-        assert_eq!(remain_lt.0, vec![Region::new(1900.0, 2400.0)]);
+        assert_eq!(remain_lt.0, vec![Region::new(1901.0, 2400.0)]);
     }
 
     #[test]
