@@ -286,6 +286,7 @@ impl Runner {
             rushed_enter_position: -1.0,
             rushed_end_position: -1.0,
             rushed_timer: Timer::new(0.0),
+            rushed_snap_marks_rolled: 0,
             rushed_max_duration: 12.0,
             rushed_activations: Vec::new(),
             pre_rushed_pos_keep_strategy: props.strategy,

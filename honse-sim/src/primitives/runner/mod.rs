@@ -356,6 +356,9 @@ pub struct Runner {
     pub rushed_end_position: f64,
     /// Rushed-duration timer.
     pub rushed_timer: Timer,
+    /// Number of 3 s snap-out marks already rolled in the current rushed
+    /// spell (0 until the first one).
+    pub rushed_snap_marks_rolled: i64,
     /// Maximum rushed duration in seconds.
     pub rushed_max_duration: f64,
     /// Log of `[start, end]` rushed activations.
