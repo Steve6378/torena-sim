@@ -50,6 +50,24 @@ const LANE_TOLERANCE: f64 = 0.05;
 /// The game's lane unit: one ten-thousandth of the course width.
 const LANE_UNITS_PER_COURSE_WIDTH: f64 = 10000.0;
 const HP_TOLERANCE: f64 = 2.0;
+/// Drift allowed on the pooled blocked share before the gate trips, as a
+/// fraction of (frame, runner) samples. The recorded share is about 3.7% of
+/// mid-race samples and 0.2% of late ones, and across the 53 fixtures the
+/// engine sits within 0.028 of the recording on every one (mean 0.007), so one
+/// percentage point is well above the noise between two runs of the same code
+/// and still well under the level being measured.
+const BLOCKED_SHARE_TOLERANCE: f64 = 0.01;
+/// The doc's rushed-spell ladder: "Every 3 seconds while rushed, the uma has a
+/// 55% chance to snap out of it. Rushed ends if the uma is still affected after
+/// 12 seconds" (`docs/mechanics/README.md`, Rushed State), so a spell lasts
+/// 3, 6, 9 or 12 s and nothing in between.
+const RUSHED_LADDER: [f64; 4] = [3.0, 6.0, 9.0, 12.0];
+/// Slack when placing a measured span on the ladder. Spans are multiples of a
+/// tick (1/15 s) and the engine replay stores frame times as `f32`, so a span
+/// that is exactly a rung can land a hair above it.
+const LADDER_EPSILON: f64 = 1e-3;
+/// `temptationMode` as the recording carries it: the enum value, not a flag.
+const TEMPTATION_MODES: [(i64, &str); 4] = [(1, "SASHI"), (2, "SENKO"), (3, "NIGE"), (4, "BOOST")];
 
 // ---------- fixture shape (mirrors torena-hub `export-sim-fixture.ts`) ----------
 
@@ -157,6 +175,23 @@ struct Scores {
     /// Mean over (observed frame, runner) of |mean simulated lane - observed|, meters from the rail.
     #[serde(default)]
     lane_mae: f64,
+    /// Pooled blocked share, simulated minus recorded: the fraction of
+    /// (frame, runner) samples with a runner blocking in front. `None` in a
+    /// baseline written before this metric existed, which is what keeps the
+    /// gate quiet until a baseline records a value to drift from.
+    #[serde(default)]
+    blocked_share_diff: Option<f64>,
+    /// Free mode only: recorded rushed spells per rung of [`RUSHED_LADDER`].
+    #[serde(default)]
+    rushed_spell_ladder_observed: [f64; 4],
+    /// Free mode only: simulated rushed spells per rung of [`RUSHED_LADDER`],
+    /// per round, so the entry does not depend on the seed count.
+    #[serde(default)]
+    rushed_spell_ladder_sim: [f64; 4],
+    /// Free mode only: mean simulated spell duration minus mean recorded one,
+    /// seconds, both read off the ladder. `None` when either side has no spell.
+    #[serde(default)]
+    rushed_spell_duration_diff: Option<f64>,
 }
 
 /// One runner's state in one frame, in engine units.
@@ -211,6 +246,13 @@ impl FrameErrors {
 
     fn mean(&self, sum: f64) -> f64 {
         sum / self.count.max(1) as f64
+    }
+
+    /// Pooled blocked share, simulated minus recorded. The per-runner report
+    /// has always printed the two sides; nothing scored the difference, so the
+    /// front-block rule could drift without any gate noticing.
+    fn blocked_share_diff(&self) -> f64 {
+        self.mean(self.blocked_sim - self.blocked_observed)
     }
 
     /// Lane MAE over frames that carried a lane on both sides; `NaN` when
@@ -357,6 +399,246 @@ fn observed_rushed_regions(observed: &Observed) -> Vec<Vec<WasmForcedRegion>> {
         }
     }
     regions
+}
+
+// ---------- rushed spell durations ----------
+
+/// The rushed spells found in one or more sampled series, with how long they
+/// ran and where they sit on the doc's ladder.
+///
+/// A sampled series brackets a spell rather than timing it: the state is only
+/// visible at the sample times, so a spell that shows up in samples
+/// `first..=last` started somewhere in the gap before `first` and ended
+/// somewhere in the gap after `last`. The span `times[last] - times[first]` is
+/// therefore a lower bound and `span + gap_before + gap_after` an upper one -
+/// the `[d, d + 2 * dt]` bracket of a uniformly sampled recording (the game's
+/// mid-race sampling is ~1.066 s, 0.066 s near the start and the finish).
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
+struct SpellTally {
+    count: usize,
+    /// Sum of the spans (each a lower bound on the spell's duration), seconds.
+    lower_sum: f64,
+    /// Sum of the bracket upper bounds, seconds.
+    upper_sum: f64,
+    /// Sum of the ladder rungs the spells were placed on, seconds.
+    ladder_sum: f64,
+    /// Spells per rung of [`RUSHED_LADDER`].
+    ladder: [usize; 4],
+}
+
+impl SpellTally {
+    /// Add every contiguous rushed run of one sampled series (one runner in one
+    /// recording, or one runner in one simulated round). A run still going in
+    /// the last sample ends there, as [`observed_rushed_regions`] also assumes.
+    fn add_series(&mut self, times: &[f64], rushed: &[bool]) {
+        let mut open: Option<usize> = None;
+        for (index, &on) in rushed.iter().enumerate() {
+            match (open, on) {
+                (None, true) => open = Some(index),
+                (Some(first), false) => {
+                    self.add_run(times, first, index - 1);
+                    open = None;
+                }
+                _ => {}
+            }
+        }
+        if let Some(first) = open {
+            self.add_run(times, first, rushed.len() - 1);
+        }
+    }
+
+    /// One spell, seen in samples `first..=last`.
+    fn add_run(&mut self, times: &[f64], first: usize, last: usize) {
+        let (Some(&start), Some(&end)) = (times.get(first), times.get(last)) else {
+            return;
+        };
+        let lower = end - start;
+        // A run that touches the edge of the series has no gap to widen the
+        // bracket with on that side, so its upper bound is under-stated. None
+        // of the 53 recordings has such a run.
+        let before = first
+            .checked_sub(1)
+            .and_then(|i| times.get(i))
+            .map_or(0.0, |&previous| start - previous);
+        let after = times.get(last + 1).map_or(0.0, |&next| next - end);
+        let rung = ladder_rung(lower);
+        self.count += 1;
+        self.lower_sum += lower;
+        self.upper_sum += lower + before + after;
+        self.ladder_sum += RUSHED_LADDER[rung];
+        self.ladder[rung] += 1;
+    }
+
+    fn merge(&mut self, other: &SpellTally) {
+        self.count += other.count;
+        self.lower_sum += other.lower_sum;
+        self.upper_sum += other.upper_sum;
+        self.ladder_sum += other.ladder_sum;
+        for (slot, added) in self.ladder.iter_mut().zip(other.ladder) {
+            *slot += added;
+        }
+    }
+
+    /// Mean of the spans, seconds; `NaN` with no spells.
+    fn mean_lower(&self) -> f64 {
+        self.mean(self.lower_sum)
+    }
+
+    /// Mean of the bracket upper bounds, seconds; `NaN` with no spells.
+    fn mean_upper(&self) -> f64 {
+        self.mean(self.upper_sum)
+    }
+
+    /// Mean duration read off the ladder, seconds; `NaN` with no spells.
+    fn mean_ladder(&self) -> f64 {
+        self.mean(self.ladder_sum)
+    }
+
+    fn mean(&self, sum: f64) -> f64 {
+        if self.count == 0 {
+            return f64::NAN;
+        }
+        sum / self.count as f64
+    }
+
+    /// Share of the spells on each rung of [`RUSHED_LADDER`].
+    fn shares(&self) -> [f64; 4] {
+        let total = self.count.max(1) as f64;
+        self.ladder.map(|n| n as f64 / total)
+    }
+}
+
+/// The shortest rung of the doc's ladder a spell can sit on given that it ran
+/// for at least `lower` seconds: every shorter rung is ruled out by the
+/// recording. Spans past the top rung clamp to it, since the doc makes 12 s the
+/// maximum duration (a debuff extension aside, which no recording marks).
+fn ladder_rung(lower: f64) -> usize {
+    RUSHED_LADDER
+        .iter()
+        .position(|&rung| lower <= rung + LADDER_EPSILON)
+        .unwrap_or(RUSHED_LADDER.len() - 1)
+}
+
+/// Rushed spells on both sides of one fixture.
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
+struct SpellComparison {
+    observed: SpellTally,
+    /// Summed over rounds; per-round figures divide by `rounds`.
+    sim: SpellTally,
+    rounds: usize,
+}
+
+impl SpellComparison {
+    fn merge(&mut self, other: &SpellComparison) {
+        self.observed.merge(&other.observed);
+        self.sim.merge(&other.sim);
+        self.rounds += other.rounds;
+    }
+}
+
+/// The recorded rushed spells of a fixture against the simulated ones.
+///
+/// The recorded side reads the `rushed` column of `observed.frames`; the
+/// simulated side reads each round's raw replay, not the seed-averaged rushed
+/// rate that `rushed_agreement` scores. That rate compares a mean against a 0/1
+/// flag over a 0.51% base rate, so it stays near 1 however wrong the spell
+/// lengths are; a duration histogram is what sees them.
+fn rushed_spells(fixture: &Fixture, replays: &[RaceReplay]) -> SpellComparison {
+    let runners = fixture.observed.results.len();
+    SpellComparison {
+        observed: observed_rushed_spells(&fixture.observed),
+        sim: simulated_rushed_spells(replays, runners),
+        rounds: replays.len(),
+    }
+}
+
+/// Recorded rushed spells, over every gate of one recording.
+fn observed_rushed_spells(observed: &Observed) -> SpellTally {
+    let times: Vec<f64> = observed.frames.iter().map(|frame| frame.time).collect();
+    let mut tally = SpellTally::default();
+    for gate in 0..observed.results.len() {
+        let rushed: Vec<bool> = observed
+            .frames
+            .iter()
+            .map(|frame| frame.rushed.get(gate).is_some_and(|&mode| mode != 0))
+            .collect();
+        tally.add_series(&times, &rushed);
+    }
+    tally
+}
+
+/// Simulated rushed spells, over every runner of every round.
+fn simulated_rushed_spells(replays: &[RaceReplay], runners: usize) -> SpellTally {
+    let mut tally = SpellTally::default();
+    for replay in replays {
+        let times: Vec<f64> = replay
+            .frames
+            .iter()
+            .map(|frame| f64::from(frame.time))
+            .collect();
+        for gate in 0..runners {
+            let rushed: Vec<bool> = replay
+                .frames
+                .iter()
+                .map(|frame| {
+                    frame
+                        .horses
+                        .get(gate)
+                        .is_some_and(|horse| horse.temptation_mode != 0)
+                })
+                .collect();
+            tally.add_series(&times, &rushed);
+        }
+    }
+    tally
+}
+
+/// Copy a fixture's spell tallies into its scores, the simulated side per round
+/// so the entry does not depend on the seed count.
+fn apply_spell_scores(scores: &mut Scores, comparison: &SpellComparison) {
+    let rounds = comparison.rounds.max(1) as f64;
+    scores.rushed_spell_ladder_observed = comparison.observed.ladder.map(|n| n as f64);
+    scores.rushed_spell_ladder_sim = comparison.sim.ladder.map(|n| n as f64 / rounds);
+    scores.rushed_spell_duration_diff = (comparison.observed.count > 0 && comparison.sim.count > 0)
+        .then(|| comparison.sim.mean_ladder() - comparison.observed.mean_ladder());
+}
+
+/// Recorded `temptationMode` samples per entry of [`TEMPTATION_MODES`]. The
+/// scoring flattens the column to `!= 0`; this keeps the enum value, so the
+/// recorded mode split can be read against the engine's rushed strategy
+/// override (`README.md`, Rushed State: front runners speed up, pace chasers
+/// become front runners, late surgers 75/25, end closers 70/20/10).
+fn observed_mode_counts(observed: &Observed) -> [usize; 4] {
+    let mut counts = [0usize; 4];
+    for frame in &observed.frames {
+        for &mode in &frame.rushed {
+            if let Some(slot) = TEMPTATION_MODES
+                .iter()
+                .position(|&(value, _)| value == mode)
+            {
+                counts[slot] += 1;
+            }
+        }
+    }
+    counts
+}
+
+/// Simulated `temptationMode` samples per entry of [`TEMPTATION_MODES`], over
+/// every round of one run.
+fn simulated_mode_counts(replays: &[RaceReplay]) -> [usize; 4] {
+    let mut counts = [0usize; 4];
+    for frame in replays.iter().flat_map(|replay| &replay.frames) {
+        for horse in &frame.horses {
+            let mode = i64::from(horse.temptation_mode);
+            if let Some(slot) = TEMPTATION_MODES
+                .iter()
+                .position(|&(value, _)| value == mode)
+            {
+                counts[slot] += 1;
+            }
+        }
+    }
+    counts
 }
 
 /// Documented HP drain per second at `speed`, before status modifiers.
@@ -706,6 +988,13 @@ fn score(fixture: &Fixture, replays: &[RaceReplay], skills_per_runner: &[Vec<i64
         hp_bias: frames.mean(frames.hp_signed),
         rushed_agreement: frames.mean(frames.rushed_agreement),
         lane_mae: frames.lane_mae(),
+        blocked_share_diff: Some(frames.blocked_share_diff()),
+        // Free mode only, filled by `apply_spell_scores`: in pinned mode the
+        // engine replays the recorded spells, so their durations are the
+        // recording's own.
+        rushed_spell_ladder_observed: [0.0; 4],
+        rushed_spell_ladder_sim: [0.0; 4],
+        rushed_spell_duration_diff: None,
     }
 }
 
@@ -726,7 +1015,7 @@ fn engine_skills(params: &WasmRaceSimParams) -> Vec<Vec<i64>> {
 
 fn print_scores(label: &str, scores: &Scores) {
     println!(
-        "  {label:<7} finish MAE {:.3}s (bias {:+.3}s)  winner {:>3.0}%  spearman {:.3}  spurt MAE {:>6.1}m  skill err {:.3}  trajectory MAE {:>5.1}m  speed MAE {:.3} (bias {:+.3}) m/s  hp MAE {:>5.1} (bias {:+6.1})  rushed agree {:.3}  lane MAE {:.2}m",
+        "  {label:<7} finish MAE {:.3}s (bias {:+.3}s)  winner {:>3.0}%  spearman {:.3}  spurt MAE {:>6.1}m  skill err {:.3}  trajectory MAE {:>5.1}m  speed MAE {:.3} (bias {:+.3}) m/s  hp MAE {:>5.1} (bias {:+6.1})  rushed agree {:.3}  lane MAE {:.2}m  blocked diff {:+.3}",
         scores.finish_time_mae,
         scores.finish_time_bias,
         scores.winner_hit_rate * 100.0,
@@ -740,7 +1029,75 @@ fn print_scores(label: &str, scores: &Scores) {
         scores.hp_bias,
         scores.rushed_agreement,
         scores.lane_mae,
+        scores.blocked_share_diff.unwrap_or(f64::NAN),
     );
+}
+
+/// One fixture's rushed spells, recorded against simulated.
+fn print_rushed_spells(comparison: &SpellComparison) {
+    print_spell_tally("recorded", &comparison.observed, 1.0);
+    print_spell_tally(
+        "simulated",
+        &comparison.sim,
+        comparison.rounds.max(1) as f64,
+    );
+}
+
+/// One side's spell tally: how many spells, how long they ran (span, bracket
+/// upper bound, ladder rung) and the ladder histogram. Counts and per-rung
+/// figures are divided by `divisor`, which is the round count on the simulated
+/// side and 1 on the recorded one.
+fn print_spell_tally(label: &str, tally: &SpellTally, divisor: f64) {
+    let shares = tally.shares();
+    println!(
+        "          spells {label:<9} {:>6.2}  span {:>5.2}s  bracket <={:>5.2}s  ladder {:>5.2}s   3s {:>5.2} ({:>3.0}%)  6s {:>5.2} ({:>3.0}%)  9s {:>5.2} ({:>3.0}%)  12s {:>5.2} ({:>3.0}%)",
+        tally.count as f64 / divisor,
+        tally.mean_lower(),
+        tally.mean_upper(),
+        tally.mean_ladder(),
+        tally.ladder[0] as f64 / divisor,
+        shares[0] * 100.0,
+        tally.ladder[1] as f64 / divisor,
+        shares[1] * 100.0,
+        tally.ladder[2] as f64 / divisor,
+        shares[2] * 100.0,
+        tally.ladder[3] as f64 / divisor,
+        shares[3] * 100.0,
+    );
+}
+
+/// The run's pooled rushed picture: spell durations on both sides, and the
+/// recorded `temptationMode` split against the simulated one. The recorded
+/// split is the enum the scoring flattens away; the engine tags a rushed runner
+/// by its style (`replay.rs`: front runner / runaway 3, pace chaser 2, else 1),
+/// so the two splits together say whether the rushed strategy override sends
+/// runners to the styles the game's recording shows.
+fn print_rushed_summary(
+    pooled: &SpellComparison,
+    observed_modes: [usize; 4],
+    sim_modes: [usize; 4],
+    fixtures: usize,
+) {
+    println!("rushed spell durations, free mode, pooled over {fixtures} fixtures");
+    print_rushed_spells(pooled);
+    println!("temptation mode samples, pooled over {fixtures} fixtures");
+    print_mode_counts("recorded", observed_modes);
+    print_mode_counts("simulated", sim_modes);
+}
+
+fn print_mode_counts(label: &str, counts: [usize; 4]) {
+    let total = counts.iter().sum::<usize>().max(1) as f64;
+    let mut line = format!(
+        "          modes {label:<9} {:>8} rushed samples ",
+        counts.iter().sum::<usize>()
+    );
+    for (&(value, name), count) in TEMPTATION_MODES.iter().zip(counts) {
+        line.push_str(&format!(
+            " {value} {name} {count:>7} ({:>4.1}%)",
+            count as f64 / total * 100.0
+        ));
+    }
+    println!("{line}");
 }
 
 /// Per-runner breakdown of a run, so a bad aggregate points at a runner.
@@ -960,6 +1317,17 @@ fn check_against_baseline(
             previous.lane_mae, scores.lane_mae
         ));
     }
+    // Blocked share is gated on drift of its magnitude, not its level: the
+    // engine's level is what the fixtures measure, but it must not wander.
+    // A baseline written before the metric existed carries no value to drift
+    // from, so the check waits for one.
+    if let (Some(before), Some(now)) = (previous.blocked_share_diff, scores.blocked_share_diff) {
+        if now.abs() > before.abs() + BLOCKED_SHARE_TOLERANCE {
+            failures.push(format!(
+                "{file} [{mode}]: blocked share drifted {before:+.3} -> {now:+.3}"
+            ));
+        }
+    }
     if scores.hp_mae > previous.hp_mae + HP_TOLERANCE {
         failures.push(format!(
             "{file} [{mode}]: HP MAE regressed {:.1} -> {:.1}",
@@ -979,6 +1347,10 @@ fn captured_races_score_no_worse_than_baseline() {
     let baseline = load_baseline();
     let mut next_baseline: Baseline = BTreeMap::new();
     let mut failures = Vec::new();
+
+    let mut pooled_spells = SpellComparison::default();
+    let mut observed_modes = [0usize; 4];
+    let mut sim_modes = [0usize; 4];
 
     println!("capture accuracy over {nsamples} seeds per run");
     for fixture in &fixtures {
@@ -1014,7 +1386,7 @@ fn captured_races_score_no_worse_than_baseline() {
         let started = std::time::Instant::now();
         let free_replays = run(&fixture.params, nsamples);
         let simulated = started.elapsed();
-        let free = score(fixture, &free_replays, &engine_skills(&fixture.params));
+        let mut free = score(fixture, &free_replays, &engine_skills(&fixture.params));
         assert!(
             free.lane_mae.is_finite(),
             "{}: no lane data in the recording; regenerate the fixture with `pnpm run race:fixture`",
@@ -1025,7 +1397,23 @@ fn captured_races_score_no_worse_than_baseline() {
             simulated.as_secs_f64(),
             (started.elapsed() - simulated).as_secs_f64()
         );
+        let spells = rushed_spells(fixture, &free_replays);
+        apply_spell_scores(&mut free, &spells);
+        pooled_spells.merge(&spells);
+        for (slot, added) in observed_modes
+            .iter_mut()
+            .zip(observed_mode_counts(&fixture.observed))
+        {
+            *slot += added;
+        }
+        for (slot, added) in sim_modes
+            .iter_mut()
+            .zip(simulated_mode_counts(&free_replays))
+        {
+            *slot += added;
+        }
         print_scores("free", &free);
+        print_rushed_spells(&spells);
 
         let mut pinned_params = fixture.params.clone();
         pin_outcomes(&mut pinned_params, &fixture.observed, fixture);
@@ -1076,6 +1464,8 @@ fn captured_races_score_no_worse_than_baseline() {
         }
     }
 
+    print_rushed_summary(&pooled_spells, observed_modes, sim_modes, fixtures.len());
+
     if update {
         let text = serde_json::to_string_pretty(&next_baseline).expect("serialize baseline");
         fs::write(baseline_path(), text + "\n").expect("write baseline");
@@ -1087,4 +1477,175 @@ fn captured_races_score_no_worse_than_baseline() {
         "accuracy regressed:\n{}",
         failures.join("\n")
     );
+}
+
+// ---------- unit tests for the metrics above ----------
+
+/// A recording frame with nothing in it but the rushed column.
+fn rushed_frame(time: f64, rushed: Vec<i64>) -> ObservedFrame {
+    let gates = rushed.len();
+    ObservedFrame {
+        time,
+        distance: vec![0.0; gates],
+        speed: vec![0.0; gates],
+        hp: vec![0.0; gates],
+        rushed,
+        blocker: vec![-1; gates],
+        lane: vec![0.0; gates],
+    }
+}
+
+/// A recording of `modes[gate][frame]` temptation modes, sampled every `dt`.
+fn recording(dt: f64, modes: &[Vec<i64>]) -> Observed {
+    let frames = (0..modes[0].len())
+        .map(|index| {
+            rushed_frame(
+                index as f64 * dt,
+                modes.iter().map(|gate| gate[index]).collect(),
+            )
+        })
+        .collect();
+    Observed {
+        frames,
+        results: (0..modes.len())
+            .map(|gate| ObservedResult {
+                finish_order: gate as i32,
+                finish_time_raw: 60.0,
+                last_spurt_start_distance: 0.0,
+            })
+            .collect(),
+        events: Vec::new(),
+    }
+}
+
+#[test]
+fn ladder_rung_takes_the_shortest_rung_the_recording_allows() {
+    // A single rushed sample bounds the spell from below at 0 s, and the
+    // shortest spell the doc allows is one 3 s interval.
+    assert_eq!(ladder_rung(0.0), 0);
+    // Three samples 1.066 s apart span 2.13 s: still a 3 s spell.
+    assert_eq!(ladder_rung(2.132), 0);
+    // A span at a rung stays on it, at tick resolution too (2.933 = 44 ticks).
+    assert_eq!(ladder_rung(3.0), 0);
+    assert_eq!(ladder_rung(2.9333), 0);
+    // Past a rung, the rung is ruled out: the spell survived that roll.
+    assert_eq!(ladder_rung(3.2), 1);
+    assert_eq!(ladder_rung(6.4), 2);
+    assert_eq!(ladder_rung(9.6), 3);
+    // The doc caps a spell at 12 s, so longer spans clamp to the top rung.
+    assert_eq!(ladder_rung(12.0), 3);
+    assert_eq!(ladder_rung(30.0), 3);
+}
+
+#[test]
+fn recorded_spells_are_bracketed_by_the_sampling_gaps() {
+    // The game's mid-race sampling: one frame every ~1.066 s. Gate 0 is rushed
+    // in three consecutive frames, gate 1 in one frame only.
+    let dt = 1.066;
+    let observed = recording(
+        dt,
+        &[vec![0, 0, 3, 3, 3, 0, 0, 0], vec![0, 0, 0, 0, 0, 0, 4, 0]],
+    );
+    let tally = observed_rushed_spells(&observed);
+    assert_eq!(tally.count, 2);
+    // Spans are 2 * dt and 0; both bracket to a 3 s spell.
+    assert!((tally.lower_sum - 2.0 * dt).abs() < 1e-9, "{tally:?}");
+    // Upper bounds add the gap before the first and after the last sample.
+    assert!(
+        (tally.upper_sum - (2.0 * dt + 4.0 * dt)).abs() < 1e-9,
+        "{tally:?}"
+    );
+    assert_eq!(tally.ladder, [2, 0, 0, 0]);
+    assert!((tally.mean_ladder() - 3.0).abs() < 1e-9);
+}
+
+#[test]
+fn a_spell_running_into_the_last_sample_still_counts() {
+    let observed = recording(1.066, &[vec![0, 0, 1, 1]]);
+    let tally = observed_rushed_spells(&observed);
+    assert_eq!(tally.count, 1);
+    assert_eq!(tally.ladder, [1, 0, 0, 0]);
+}
+
+#[test]
+fn tick_resolution_spells_land_on_their_ladder_rung() {
+    // The engine ticks at 1/15 s: a 3 s spell shows up in 45 frames spanning
+    // 44 ticks, a 12 s one in 181 frames spanning 180 ticks. Both must land on
+    // their own rung rather than one below.
+    for (ticks, rung) in [(45usize, 0usize), (90, 1), (135, 2), (181, 3)] {
+        let times: Vec<f64> = (0..400).map(|i| f64::from(i) * TICK_SECONDS).collect();
+        let mut rushed = vec![false; 400];
+        for flag in rushed.iter_mut().skip(10).take(ticks) {
+            *flag = true;
+        }
+        let mut tally = SpellTally::default();
+        tally.add_series(&times, &rushed);
+        assert_eq!(tally.count, 1);
+        assert_eq!(tally.ladder[rung], 1, "{ticks} ticks: {tally:?}");
+    }
+}
+
+#[test]
+fn the_duration_metric_sees_what_rushed_agreement_cannot() {
+    // Rushed agreement compares a seed-averaged rate against a 0/1 flag over a
+    // 0.51% base rate: an engine that always runs a spell to the 12 s cap where
+    // the recording shows a 3 s one still scores ~0.99, because the frames it
+    // gets wrong are a rounding error in the pool.
+    let mut errors = FrameErrors::default();
+    // Frames of a 3 s spell against frames of a 12 s one, at a 1/15 s tick.
+    let recorded_frames = 45;
+    let simulated_frames = 181;
+    for frame in 0..10_000 {
+        let observed_rushed = f64::from(u8::from(frame < recorded_frames));
+        let sim_rushed = f64::from(u8::from(frame < simulated_frames));
+        errors.add(
+            FrameSample {
+                rushed: sim_rushed,
+                ..FrameSample::default()
+            },
+            FrameSample {
+                rushed: observed_rushed,
+                ..FrameSample::default()
+            },
+        );
+    }
+    let agreement = errors.mean(errors.rushed_agreement);
+    assert!(agreement > 0.98, "agreement {agreement:.4}");
+
+    // The duration metric puts the same pair three rungs apart.
+    let times: Vec<f64> = (0..400).map(|i| f64::from(i) * TICK_SECONDS).collect();
+    let mut recorded = SpellTally::default();
+    let mut simulated = SpellTally::default();
+    let mut flags = vec![false; 400];
+    flags[..45].fill(true);
+    recorded.add_series(&times, &flags);
+    let mut flags = vec![false; 400];
+    flags[..181].fill(true);
+    simulated.add_series(&times, &flags);
+    assert_eq!(recorded.ladder, [1, 0, 0, 0]);
+    assert_eq!(simulated.ladder, [0, 0, 0, 1]);
+    assert!((simulated.mean_ladder() - recorded.mean_ladder() - 9.0).abs() < 1e-9);
+}
+
+#[test]
+fn mode_counts_keep_the_temptation_enum() {
+    // The scoring flattens the column to `!= 0`; the distribution keeps the
+    // enum, including mode 4 (BOOST), which the engine's replay never writes.
+    let observed = recording(1.066, &[vec![0, 3, 3, 1], vec![0, 0, 4, 2]]);
+    assert_eq!(observed_mode_counts(&observed), [1, 1, 2, 1]);
+}
+
+#[test]
+fn blocked_share_difference_is_signed_and_pooled() {
+    let mut errors = FrameErrors::default();
+    let blocked = |value: f64| FrameSample {
+        blocked: value,
+        ..FrameSample::default()
+    };
+    // Four samples: the engine blocks in half of them, the recording in one.
+    errors.add(blocked(1.0), blocked(1.0));
+    errors.add(blocked(1.0), blocked(0.0));
+    errors.add(blocked(0.0), blocked(0.0));
+    errors.add(blocked(0.0), blocked(0.0));
+    assert!((errors.blocked_share_diff() - 0.25).abs() < 1e-12);
 }
