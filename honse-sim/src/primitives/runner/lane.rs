@@ -2,16 +2,19 @@
 //! § Overlapping).
 //!
 //! Pure functions over the runner's own lane state and the frozen snapshots of
-//! the other runners. The step calls [`resolve_target_lane`] once per tick when
-//! a live field is present; the synthetic engine keeps its approximation.
+//! the other runners. The step calls [`resolve_target_lane`] when a live field
+//! is present and the doc's refresh rule fires — on arrival within 0.5 horse
+//! lane of the target, on a block toward it, or on an overlap bump (mechanics
+//! § Target Lane); the synthetic engine keeps its approximation.
 //!
 //! The doc measures lanes in course widths; this module keeps lanes in meters
 //! and scales the doc's constants by the course width where it reads them.
 //!
-//! Two numbers are fixed here and named as assumptions: the longitudinal
-//! reach for the "inside uma" of normal-mode rule 5, taken as the crowd
-//! distance (3 m), and the pace-down lane 0.18, read as meters against the
-//! doc's unit because the captures score worse with it in widths.
+//! One number is fixed here and named as an assumption: the longitudinal reach
+//! for the "inside uma" of normal-mode rule 5, taken as the crowd distance
+//! (3 m). One more, the pace-down lane 0.18, is read as meters against the
+//! doc's unit; that one is a known deviation, not an assumption, and
+//! `PACE_DOWN_LANE` carries the evidence.
 
 use crate::runner::physics::RunnerSnapshot;
 use crate::shared_kernel::ids::RunnerId;
@@ -26,9 +29,23 @@ const CANDIDATE_HALF_WIDTH_LANES: f64 = 0.8;
 /// Side blocking reach along the course (mechanics § Side Blocking).
 const SIDE_BLOCK_DISTANCE: f64 = 1.05;
 /// Normal-mode rule 2: the lane a pace-down runner steers to.
-/// ASSUMPTION: read as meters. The doc's lane unit is the course width, but
-/// 0.18 widths (2.0 m) parks the paced-down runner inside the bunch and caps
-/// the field behind it (capture-findings § Lane units).
+///
+/// KNOWN DEVIATION, not an assumption: the doc measures this in course widths
+/// like every other lane constant, and the recordings settle it — two
+/// paced-down runners with nobody inside them and no front blocker march
+/// outward at the documented lane-change speed to 1639 and 1498 lane units
+/// (1/10000 course width), bounding the target at 1758 units or more, where
+/// 0.18 m is 160 units and 0.18 widths is 1800.
+///
+/// It is nevertheless read as meters here, because scaling it by the course
+/// width alone costs pinned finish MAE 0.203 to 0.217 s over the 53 captures.
+/// Two documented rules this engine is missing account for most of that (side
+/// blocking read as a corridor rather than the doc's two-horse-lane window,
+/// and normal mode never being forced in the 200 m before the move lane
+/// point); the remainder needs the outside-lane course-distance penalty of
+/// mechanics § Position, World Transform, which needs course geometry no
+/// capture carries. See capture-findings § Pace-down lane: unit settled,
+/// constant held back — with the whole story and every number.
 const PACE_DOWN_LANE: f64 = 0.18;
 /// Normal-mode rule 4: the inward drift per update in early and mid race, in
 /// course widths.
@@ -132,6 +149,13 @@ pub fn overtake_targets<'a>(
 /// beside it in the way (mechanics § Side Blocking): nothing within 1.05 m
 /// fore or aft whose lane lies between the two, widened by the candidate's
 /// half width on the far side.
+///
+/// KNOWN DEVIATION: the doc blocks on a side only for a runner under **two
+/// horse lanes** across, not for anyone anywhere in the corridor to the
+/// target. The two agree while targets are close; they part once a rule aims
+/// the runner a full 0.18 course width away, which is why this and
+/// `PACE_DOWN_LANE` have to be fixed together (capture-findings § Pace-down
+/// lane: unit settled, constant held back).
 pub fn side_space_free(
     me: &LaneSelf,
     others: &[RunnerSnapshot],
@@ -327,6 +351,11 @@ pub fn normal_target_lane(me: &LaneSelf, others: &[RunnerSnapshot], course: &Lan
 }
 
 /// The mode and target lane for this tick.
+///
+/// KNOWN DEVIATION: the doc also forces normal mode "within 200 m before the
+/// move lane point during early-race or mid-race" (mechanics § Normal Mode),
+/// which this only reaches through the no-overtake-targets clause
+/// (capture-findings § Pace-down lane: unit settled, constant held back).
 pub fn resolve_target_lane(
     me: &LaneSelf,
     others: &[RunnerSnapshot],
