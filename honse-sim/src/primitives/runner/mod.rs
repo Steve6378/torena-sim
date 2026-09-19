@@ -365,6 +365,16 @@ pub struct Runner {
     pub rushed_activations: Vec<(f64, f64)>,
     /// Position-keep strategy before rushing (restored on exit).
     pub pre_rushed_pos_keep_strategy: Strategy,
+    /// The strategy the rushed override picked for the current spell, as
+    /// recorded when the override ran; `None` while not rushed.
+    ///
+    /// The override writes its pick into
+    /// [`position_keep_strategy`](Self::position_keep_strategy), but that field
+    /// keeps moving afterwards -- the pacer promotion and the `ChangeStrategy`
+    /// skill both reassign it mid-spell -- so it cannot be read back as "what
+    /// the override chose". This field is the pick itself, fixed for the
+    /// duration of the spell.
+    pub rushed_keep_strategy: Option<Strategy>,
     /// Index into forced rushed regions.
     pub forced_rushed_index: usize,
     /// Whether currently inside a forced rushed region.

@@ -53,6 +53,9 @@ impl RunnerObservation for Runner {
     fn is_rushed(&self) -> bool {
         self.is_rushed
     }
+    fn rushed_keep_style(&self) -> i64 {
+        self.rushed_keep_strategy.map_or(0, |s| s as i64)
+    }
     fn is_dueling(&self) -> bool {
         self.is_dueling
     }
