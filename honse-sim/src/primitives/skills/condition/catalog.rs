@@ -205,6 +205,44 @@ impl Cond {
         self.set(CmpKind::Gte, f)
     }
 
+    /// Register one filter under both a non-strict comparison and its strict
+    /// twin.
+    ///
+    /// For conditions whose filter clips regions by a threshold on a quantity
+    /// that advances monotonically with course position (`distance_rate`,
+    /// `remain_distance`, the `*_continuetime` / `change_order_up_*` static
+    /// fallbacks): the strict and non-strict bounds differ by the single
+    /// threshold point, which a half-open `[start, end)` region cannot
+    /// distinguish, so the same clip serves both. Leaving the strict slot empty
+    /// is the one thing that must not happen: an unregistered comparison is
+    /// [`ConditionError::Unsupported`], and `build_skill_data` turns that into
+    /// "this skill has no triggers at all".
+    fn non_strict_and_strict<F>(mut self, non_strict: CmpKind, strict: CmpKind, f: F) -> Self
+    where
+        F: for<'a> Fn(&ConditionFilterParams<'a>) -> FilterResult + Send + Sync + 'static,
+    {
+        let shared: FilterFn = Arc::new(f);
+        self.filters[cmp_index(non_strict)] = Some(Arc::clone(&shared));
+        self.filters[cmp_index(strict)] = Some(shared);
+        self
+    }
+
+    /// Register `f` for both `<=` and `<` (see [`Cond::non_strict_and_strict`]).
+    fn lte_lt<F>(self, f: F) -> Self
+    where
+        F: for<'a> Fn(&ConditionFilterParams<'a>) -> FilterResult + Send + Sync + 'static,
+    {
+        self.non_strict_and_strict(CmpKind::Lte, CmpKind::Lt, f)
+    }
+
+    /// Register `f` for both `>=` and `>` (see [`Cond::non_strict_and_strict`]).
+    fn gte_gt<F>(self, f: F) -> Self
+    where
+        F: for<'a> Fn(&ConditionFilterParams<'a>) -> FilterResult + Send + Sync + 'static,
+    {
+        self.non_strict_and_strict(CmpKind::Gte, CmpKind::Gt, f)
+    }
+
     /// Set every comparison to a no-op (return regions unchanged).
     fn noop_all(mut self) -> Self {
         let noop: FilterFn = Arc::new(|p: &ConditionFilterParams<'_>| pass(p.regions.clone()));
@@ -636,6 +674,16 @@ pub fn build_catalog() -> ConditionCatalog {
                     Some(DynamicCondition::new(move |r| r.accumulate_time() >= t)),
                 ))
             })
+            .gt(|p| {
+                let t = p.arg as f64;
+                // `t > arg` implies `t >= arg`, so the same earliest-possible
+                // shift bounds the window; the gate itself is strict.
+                let regions = shift_regions_forward_by_min_time(p);
+                Ok((
+                    regions,
+                    Some(DynamicCondition::new(move |r| r.accumulate_time() > t)),
+                ))
+            })
             .build(),
     );
     add(
@@ -659,6 +707,24 @@ pub fn build_catalog() -> ConditionCatalog {
                     })),
                 ))
             })
+            .lt(|p| {
+                let n = p.arg;
+                Ok((
+                    p.regions.clone(),
+                    Some(DynamicCondition::new(move |r| {
+                        r.skills_activated_count() < n
+                    })),
+                ))
+            })
+            .gt(|p| {
+                let n = p.arg;
+                Ok((
+                    p.regions.clone(),
+                    Some(DynamicCondition::new(move |r| {
+                        r.skills_activated_count() > n
+                    })),
+                ))
+            })
             .build(),
     );
     add("activate_count_start", activate_count_phase(0));
@@ -673,6 +739,15 @@ pub fn build_catalog() -> ConditionCatalog {
                     p.regions.clone(),
                     Some(DynamicCondition::new(move |r| {
                         r.heals_activated_count() >= n
+                    })),
+                ))
+            })
+            .gt(|p| {
+                let n = p.arg;
+                Ok((
+                    p.regions.clone(),
+                    Some(DynamicCondition::new(move |r| {
+                        r.heals_activated_count() > n
                     })),
                 ))
             })
@@ -750,7 +825,7 @@ pub fn build_catalog() -> ConditionCatalog {
         "blocked_front_continuetime",
         dynamic_or_static(
             Cond::new(ActivationSamplePolicy::Erlang { k: 3, lambda: 2.0 })
-                .gte(|p| pass(shift_regions_forward_by_min_time(p)))
+                .gte_gt(|p| pass(shift_regions_forward_by_min_time(p)))
                 .build(),
             "blocked_front_continuetime",
         ),
@@ -759,7 +834,7 @@ pub fn build_catalog() -> ConditionCatalog {
         "blocked_side_continuetime",
         dynamic_or_static(
             Cond::new(ActivationSamplePolicy::Erlang { k: 3, lambda: 2.0 })
-                .gte(|p| pass(shift_regions_forward_by_min_time(p)))
+                .gte_gt(|p| pass(shift_regions_forward_by_min_time(p)))
                 .build(),
             "blocked_side_continuetime",
         ),
@@ -772,7 +847,7 @@ pub fn build_catalog() -> ConditionCatalog {
         "change_order_up_end_after",
         dynamic_or_static(
             Cond::new(ActivationSamplePolicy::Erlang { k: 3, lambda: 2.0 })
-                .gte(|p| {
+                .gte_gt(|p| {
                     let bounds = Region::new(
                         phase_start(p.course.distance, Phase::LateRace),
                         p.course.distance,
@@ -787,7 +862,7 @@ pub fn build_catalog() -> ConditionCatalog {
         "change_order_up_finalcorner_after",
         dynamic_or_static(
             Cond::new(ActivationSamplePolicy::Erlang { k: 3, lambda: 2.0 })
-                .gte(|p| {
+                .gte_gt(|p| {
                     if !is_sorted_by_start(&p.course.corners) {
                         return Err(ConditionError::Invalid(
                             "course corners must be sorted by start",
@@ -807,7 +882,7 @@ pub fn build_catalog() -> ConditionCatalog {
         "change_order_up_middle",
         dynamic_or_static(
             Cond::new(ActivationSamplePolicy::Erlang { k: 3, lambda: 2.0 })
-                .gte(|p| {
+                .gte_gt(|p| {
                     let bounds = Region::new(
                         phase_start(p.course.distance, Phase::MidRace),
                         phase_end(p.course.distance, Phase::MidRace),
@@ -894,11 +969,11 @@ pub fn build_catalog() -> ConditionCatalog {
     add(
         "distance_rate",
         immediate()
-            .lte(|p| {
+            .lte_lt(|p| {
                 let bounds = Region::new(0.0, p.course.distance * p.arg as f64 / 100.0);
                 pass(p.regions.rmap(move |r| r.intersect(&bounds)))
             })
-            .gte(|p| {
+            .gte_gt(|p| {
                 let bounds =
                     Region::new(p.course.distance * p.arg as f64 / 100.0, p.course.distance);
                 pass(p.regions.rmap(move |r| r.intersect(&bounds)))
@@ -983,6 +1058,24 @@ pub fn build_catalog() -> ConditionCatalog {
                     p.regions.clone(),
                     Some(DynamicCondition::new(move |r| {
                         r.health_ratio_remaining() >= hp
+                    })),
+                ))
+            })
+            .lt(|p| {
+                let hp = p.arg as f64 / 100.0;
+                Ok((
+                    p.regions.clone(),
+                    Some(DynamicCondition::new(move |r| {
+                        r.health_ratio_remaining() < hp
+                    })),
+                ))
+            })
+            .gt(|p| {
+                let hp = p.arg as f64 / 100.0;
+                Ok((
+                    p.regions.clone(),
+                    Some(DynamicCondition::new(move |r| {
+                        r.health_ratio_remaining() > hp
                     })),
                 ))
             })
@@ -1471,6 +1564,20 @@ pub fn build_catalog() -> ConditionCatalog {
                     Some(DynamicCondition::new(move |r| gate_block(r.gate()) >= post)),
                 ))
             })
+            .lt(|p| {
+                let post = p.arg;
+                Ok((
+                    p.regions.clone(),
+                    Some(DynamicCondition::new(move |r| gate_block(r.gate()) < post)),
+                ))
+            })
+            .gt(|p| {
+                let post = p.arg;
+                Ok((
+                    p.regions.clone(),
+                    Some(DynamicCondition::new(move |r| gate_block(r.gate()) > post)),
+                ))
+            })
             .build(),
     );
     add(
@@ -1495,11 +1602,11 @@ pub fn build_catalog() -> ConditionCatalog {
                 );
                 pass(p.regions.rmap(move |r| r.intersect(&bounds)))
             })
-            .lte(|p| {
+            .lte_lt(|p| {
                 let bounds = Region::new(p.course.distance - p.arg as f64, p.course.distance);
                 pass(p.regions.rmap(move |r| r.intersect(&bounds)))
             })
-            .gte(|p| {
+            .gte_gt(|p| {
                 let bounds = Region::new(0.0, p.course.distance - p.arg as f64);
                 pass(p.regions.rmap(move |r| r.intersect(&bounds)))
             })
@@ -1839,6 +1946,15 @@ pub fn build_catalog() -> ConditionCatalog {
                     })),
                 ))
             })
+            .gt(|p| {
+                let n = p.arg;
+                Ok((
+                    p.regions.clone(),
+                    Some(DynamicCondition::new(move |r| {
+                        r.skills_activated_half_race(1) > n
+                    })),
+                ))
+            })
             .build(),
     );
     add(
@@ -2005,6 +2121,15 @@ fn activate_count_phase(phase_index: usize) -> Arc<dyn Condition> {
                 p.regions.clone(),
                 Some(DynamicCondition::new(move |r| {
                     r.skills_activated_in_phase(phase_index) >= n
+                })),
+            ))
+        })
+        .gt(move |p| {
+            let n = p.arg;
+            Ok((
+                p.regions.clone(),
+                Some(DynamicCondition::new(move |r| {
+                    r.skills_activated_in_phase(phase_index) > n
                 })),
             ))
         })
@@ -2351,6 +2476,91 @@ mod tests {
     fn distance_rate_lte_clips_front() {
         let (regions, _) = apply("distance_rate<=50");
         assert_eq!(regions.0, vec![Region::new(0.0, 1200.0)]);
+    }
+
+    #[test]
+    fn strict_inequalities_clip_the_same_window_on_position_tokens() {
+        // `distance_rate` / `remain_distance` registered only `<=` / `>=`, so a
+        // strict term was `ConditionError::Unsupported` — which `build_skill_data`
+        // turns into "this skill has no triggers at all". The clip is shared with
+        // the non-strict twin: regions are half-open `[start, end)`, so the one
+        // point the strict bound excludes is not representable either way.
+        let (lt, _) = apply("distance_rate<50");
+        assert_eq!(lt.0, vec![Region::new(0.0, 1200.0)]);
+        let (gt, _) = apply("distance_rate>50");
+        assert_eq!(gt.0, vec![Region::new(1200.0, 2400.0)]);
+        let (remain_gt, _) = apply("remain_distance>500");
+        assert_eq!(remain_gt.0, vec![Region::new(0.0, 1900.0)]);
+        let (remain_lt, _) = apply("remain_distance<500");
+        assert_eq!(remain_lt.0, vec![Region::new(1900.0, 2400.0)]);
+    }
+
+    #[test]
+    fn strict_inequalities_gate_strictly_on_dynamic_tokens() {
+        // DummyRunner reports full HP and zero elapsed time, so on these tokens
+        // the strict form must be false exactly where the non-strict one is true.
+        let (_, hp_lte) = apply("hp_per<=100");
+        assert!(hp_lte.expect("dynamic condition").eval(&DummyRunner));
+        let (_, hp_lt) = apply("hp_per<100");
+        assert!(!hp_lt.expect("dynamic condition").eval(&DummyRunner));
+
+        let (_, time_gte) = apply("accumulatetime>=0");
+        assert!(time_gte.expect("dynamic condition").eval(&DummyRunner));
+        let (_, time_gt) = apply("accumulatetime>0");
+        assert!(!time_gt.expect("dynamic condition").eval(&DummyRunner));
+    }
+
+    #[test]
+    fn every_registered_non_strict_comparison_has_a_strict_twin() {
+        // The guard behind the two tests above: wherever a token accepts `<=`
+        // (`>=`), it must also accept `<` (`>`). An unregistered comparison is
+        // `ConditionError::Unsupported`, and `build_skill_data` drops the whole
+        // skill when apply fails, so a strict term on a token that registers
+        // only the non-strict form removes a skill from the race silently.
+        // Both resolutions are checked: a `dynamic_or_static` condition only
+        // falls back to its static inner under `Static`.
+        let catalog = build_catalog();
+        let course = course();
+        let runner = runner();
+        let extra = params();
+        let supported = |cond: &Arc<dyn Condition>, kind: CmpKind, resolution| {
+            let p = ConditionFilterParams {
+                regions: whole_course(&course),
+                arg: 1,
+                course: &course,
+                runner: &runner,
+                extra: &extra,
+                resolution,
+            };
+            let result = match kind {
+                CmpKind::Eq => cond.filter_eq(&p),
+                CmpKind::Neq => cond.filter_neq(&p),
+                CmpKind::Lt => cond.filter_lt(&p),
+                CmpKind::Lte => cond.filter_lte(&p),
+                CmpKind::Gt => cond.filter_gt(&p),
+                CmpKind::Gte => cond.filter_gte(&p),
+            };
+            !matches!(result, Err(ConditionError::Unsupported))
+        };
+
+        let mut gaps: Vec<String> = Vec::new();
+        for resolution in [ConditionResolution::Dynamic, ConditionResolution::Static] {
+            for (name, cond) in &catalog {
+                for (non_strict, strict) in
+                    [(CmpKind::Lte, CmpKind::Lt), (CmpKind::Gte, CmpKind::Gt)]
+                {
+                    if supported(cond, non_strict, resolution)
+                        && !supported(cond, strict, resolution)
+                    {
+                        gaps.push(format!(
+                            "{name} ({resolution:?}): {non_strict:?} without {strict:?}"
+                        ));
+                    }
+                }
+            }
+        }
+        gaps.sort();
+        assert!(gaps.is_empty(), "strict comparison missing: {gaps:?}");
     }
 
     #[test]
