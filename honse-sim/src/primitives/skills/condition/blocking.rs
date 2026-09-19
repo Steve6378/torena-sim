@@ -115,6 +115,16 @@ pub fn register_blocking_conditions() {
         })
     });
 
+    // Mechanics § Side Blocking: a uma is blocked on either side while another
+    // uma sits inside the side-block window. This token is the instantaneous
+    // state; `blocked_side_continuetime` is its duration proxy. Both read the
+    // same predicate, so the pair can never disagree.
+    register_dynamic_condition("blocked_side", |arg, cmp| {
+        DynamicCondition::new(move |r| {
+            compare(bool_num(has_side_blocking_runner(r)), arg as f64, cmp)
+        })
+    });
+
     register_dynamic_condition("blocked_side_continuetime", |arg, cmp| {
         DynamicCondition::new(move |r| {
             compare(
@@ -240,6 +250,57 @@ mod tests {
     }
 
     #[test]
+    fn blocked_side_reports_the_instantaneous_side_block_state() {
+        register_blocking_conditions();
+        let factory = get_dynamic_condition("blocked_side").expect("registered");
+        let cond = factory(1, CmpKind::Eq);
+
+        // Rival one meter back and half a horse lane inside: blocked.
+        let blocked_left = TestRunner {
+            position: 100.0,
+            current_lane: 1.0,
+            snapshots: vec![snap(99.0, 0.5, 0.0)],
+            ..Default::default()
+        };
+        assert!(cond.eval(&blocked_left));
+
+        // Rival half a horse lane outside: also blocked (either side counts).
+        let blocked_right = TestRunner {
+            position: 100.0,
+            current_lane: 1.0,
+            snapshots: vec![snap(101.0, 1.5, 0.0)],
+            ..Default::default()
+        };
+        assert!(cond.eval(&blocked_right));
+
+        // Beyond the side-block reach longitudinally.
+        let too_far = TestRunner {
+            position: 100.0,
+            current_lane: 1.0,
+            snapshots: vec![snap(104.0, 0.5, 0.0)],
+            ..Default::default()
+        };
+        assert!(!cond.eval(&too_far));
+
+        // Beyond the side-block reach laterally.
+        let off_lane = TestRunner {
+            position: 100.0,
+            current_lane: 1.0,
+            snapshots: vec![snap(101.0, 5.0, 0.0)],
+            ..Default::default()
+        };
+        assert!(!cond.eval(&off_lane));
+
+        // Nobody else on the track.
+        let clear = TestRunner {
+            position: 100.0,
+            ..Default::default()
+        };
+        assert!(!cond.eval(&clear));
+        assert!(factory(0, CmpKind::Eq).eval(&clear));
+    }
+
+    #[test]
     fn blocked_side_continuetime_uses_elapsed_time_when_blocked() {
         register_blocking_conditions();
         let factory = get_dynamic_condition("blocked_side_continuetime").expect("registered");
@@ -307,5 +368,6 @@ mod tests {
         register_all_dynamic_conditions();
         assert!(get_dynamic_condition("blocked_front").is_some());
         assert!(get_dynamic_condition("overtake_target_time").is_some());
+        assert!(get_dynamic_condition("blocked_side").is_some());
     }
 }

@@ -834,6 +834,10 @@ pub fn build_catalog() -> ConditionCatalog {
         ),
     );
     add(
+        "blocked_side",
+        dynamic_or_static(noop_erlang(3, 2.0), "blocked_side"),
+    );
+    add(
         "blocked_side_continuetime",
         dynamic_or_static(
             Cond::new(ActivationSamplePolicy::Erlang { k: 3, lambda: 2.0 })
@@ -2467,6 +2471,18 @@ mod tests {
             Some([(6, 6), (1, 1), (1, 1), (1, 1)]),
         );
         assert!(regions.0.is_empty(), "{:?}", regions.0);
+    }
+
+    #[test]
+    fn blocked_side_is_a_known_token_and_resolves_dynamically() {
+        // Before this token was catalogued, `parse` raised UnknownCondition and
+        // `build_skill_data` dropped the whole skill, so nothing conditioned on
+        // it could ever activate.
+        assert!(known_condition_tokens().contains("blocked_side"));
+        let (regions, cond) = apply("blocked_side==1");
+        assert_eq!(regions.0, vec![Region::new(0.0, 2400.0)]);
+        // An empty field blocks nobody, so the live gate rejects it.
+        assert!(!cond.expect("dynamic condition").eval(&DummyRunner));
     }
 
     #[test]
