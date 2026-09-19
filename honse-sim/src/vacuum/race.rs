@@ -353,7 +353,7 @@ impl Race {
         self.accumulated_time += dt;
 
         let snapshot = build_field_snapshot(
-            &mut self.runners,
+            &self.runners,
             &self.finished_runners,
             &mut self.order_tracker,
         );
@@ -729,7 +729,7 @@ mod tests {
         race.prepare_round(7);
 
         let snapshot = build_field_snapshot(
-            &mut race.runners,
+            &race.runners,
             &race.finished_runners,
             &mut race.order_tracker,
         );
@@ -792,7 +792,7 @@ mod tests {
         race.prepare_round(7);
 
         let snapshot = build_field_snapshot(
-            &mut race.runners,
+            &race.runners,
             &race.finished_runners,
             &mut race.order_tracker,
         );
@@ -834,7 +834,7 @@ mod tests {
         race.prepare_round(7);
 
         let snapshot = build_field_snapshot(
-            &mut race.runners,
+            &race.runners,
             &race.finished_runners,
             &mut race.order_tracker,
         );
