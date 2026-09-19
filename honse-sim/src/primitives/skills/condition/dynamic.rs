@@ -189,6 +189,13 @@ pub trait RunnerView {
     fn is_dueling(&self) -> bool {
         false
     }
+    /// Whether a runner blocks this one in front this tick (mechanics § Front
+    /// Blocking). Resolved by the field producer with the same predicate the
+    /// physics step uses, so the token conditions and the speed cap never
+    /// disagree; `false` when no live field resolved it.
+    fn is_front_blocked(&self) -> bool {
+        false
+    }
     /// The runner's current finishing order (1-based), if assigned.
     fn current_order(&self) -> Option<i64> {
         None

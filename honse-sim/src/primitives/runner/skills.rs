@@ -46,6 +46,11 @@ pub struct FieldView {
     pub num_umas: i64,
     /// The leader's position in meters, if known.
     pub leader_position: Option<f64>,
+    /// Whether a runner blocks this one in front this tick (mechanics § Front
+    /// Blocking). The field producer resolves it with the same predicate the
+    /// physics step's speed cap reads, so the `blocked_front*` token conditions
+    /// cannot disagree with the physics.
+    pub is_front_blocked: bool,
     /// Snapshots of every *other* active runner.
     pub other_snapshots: Vec<DynRunnerSnapshot>,
     /// Live state of every active runner (including self).
@@ -147,6 +152,9 @@ impl RunnerView for RunnerConditionView<'_> {
     }
     fn is_dueling(&self) -> bool {
         self.runner.is_dueling
+    }
+    fn is_front_blocked(&self) -> bool {
+        self.field.is_front_blocked
     }
     fn current_order(&self) -> Option<i64> {
         self.field.self_order

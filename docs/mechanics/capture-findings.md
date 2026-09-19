@@ -145,7 +145,11 @@ front-blocked in 9 to 20% of late-race frames by strategy; the game's recorded
 blocker column is near zero in the same frames. The engine does not spread
 the pack the way the game's rules do (two horse lanes from the runner inside
 in mid-race, candidate lanes in overtake mode), so its pack stacks and stays
-capped. The cap is wired but off until those rules land.
+capped. Once the documented target-lane rules landed (#100) the cap went on and
+stayed on: the engine resolves the front blocker with the documented 2 m taper,
+closest gap wins, and caps the blocked runner's speed at 0.988 to 1.0 times the
+blocker's (`primitives/runner/physics.rs`, `FrontBlock::speed_cap` and the cap in
+`on_update`). The scoreboard row below records the result.
 
 ## Lane units: fixed, one constant held back
 

@@ -218,7 +218,16 @@ pub fn proximity_snapshots(snapshot: &FieldSnapshot) -> Vec<RunnerSnapshot> {
 }
 
 /// Build the per-runner [`FieldView`] from the frozen snapshot.
-pub fn build_field_view(self_id: RunnerId, snapshot: &FieldSnapshot) -> FieldView {
+///
+/// `is_front_blocked` is the producer's answer to "does a runner block this one
+/// in front this tick" (mechanics § Front Blocking) — the very value the physics
+/// step's speed cap reads, so the `blocked_front*` token conditions evaluate the
+/// same predicate rather than a second, looser one of their own.
+pub fn build_field_view(
+    self_id: RunnerId,
+    snapshot: &FieldSnapshot,
+    is_front_blocked: bool,
+) -> FieldView {
     let other_snapshots: Vec<DynRunnerSnapshot> = snapshot
         .entries
         .iter()
@@ -247,6 +256,7 @@ pub fn build_field_view(self_id: RunnerId, snapshot: &FieldSnapshot) -> FieldVie
         self_previous_order: snapshot.previous_order.get(&self_id).copied(),
         num_umas: snapshot.num_total,
         leader_position: snapshot.leader_position,
+        is_front_blocked,
         other_snapshots,
         active_runners,
     }

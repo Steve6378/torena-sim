@@ -365,7 +365,10 @@ impl Race {
                 continue;
             }
             update_position_keep_coefficient(runner);
-            let field = build_field_view(runner.id, &snapshot);
+            // The vacuum field has no front-block resolution: dynamic blocking
+            // conditions are pre-resolved to static regions here, and the step
+            // takes `front_block: None`.
+            let field = build_field_view(runner.id, &snapshot, false);
             let backward_strategy_runner_ahead = snapshot.entries.iter().any(|entry| {
                 entry.position > runner.position
                     && entry.strategy.order_rank() > runner.position_keep_strategy.order_rank()
