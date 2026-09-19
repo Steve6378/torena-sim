@@ -22,7 +22,7 @@ use uma_sim_primitives::race_support::{
 };
 use uma_sim_primitives::runner::lifecycle::{CreateRunner, PrepareContext};
 use uma_sim_primitives::runner::physics::{
-    update_first_position_in_late_race, DuelingInput, FieldInputs, RunnerSnapshot,
+    update_first_position_in_late_race, DuelingInput, FieldInputs, FrontBlock, RunnerSnapshot,
     SkillTriggerInputs, UpdateContext,
 };
 use uma_sim_primitives::runner::skills::FieldView;
@@ -384,7 +384,11 @@ impl Race {
                 continue;
             }
             update_position_keep_coefficient(runner);
-            let field = build_field_view(runner.id, &snapshot);
+            // One front-block resolution per runner per tick: the physics speed
+            // cap, the lane rules and the `blocked_front*` token conditions all
+            // read this single answer (mechanics § Front Blocking).
+            let front_block = front_blocking_runner(runner, &proximity, self.course.horse_lane);
+            let field = build_field_view(runner.id, &snapshot, front_block.is_some());
             let backward_strategy_runner_ahead = snapshot.entries.iter().any(|entry| {
                 entry.position > runner.position
                     && entry.strategy.order_rank() > runner.position_keep_strategy.order_rank()
@@ -416,6 +420,7 @@ impl Race {
                 &field,
                 position_keep,
                 self.course.horse_lane,
+                front_block,
             );
             let ctx = UpdateContext {
                 base_speed,
@@ -929,8 +934,8 @@ fn resolve_field_inputs<'a>(
     field: &'a FieldView,
     position_keep: PositionKeepContext,
     horse_lane: f64,
+    front_block: Option<FrontBlock>,
 ) -> FieldInputs<'a> {
-    let front_block = front_blocking_runner(runner, snapshots, horse_lane);
     FieldInputs {
         side_blocked: has_side_blocking_runner(runner, snapshots, horse_lane),
         front_block,
@@ -1495,9 +1500,58 @@ mod tests {
         assert_eq!(snapshot.num_total, 3);
 
         // The trailing runner's field view reports last place over the full field.
-        let view = build_field_view(RunnerId(0), &snapshot);
+        let view = build_field_view(RunnerId(0), &snapshot, false);
         assert_eq!(view.self_order, Some(3));
         assert_eq!(view.num_umas, 3);
+    }
+
+    /// The `blocked_front*` token conditions and the physics speed cap must read
+    /// one answer (mechanics § Front Blocking). The producer resolves the front
+    /// blocker once and hands the same boolean to the skills field view, so a
+    /// runner 3 m ahead — blocked under the old token-only 5 m window, clear
+    /// under the documented 2 m taper — reads clear on both sides.
+    #[test]
+    fn field_view_front_block_flag_tracks_the_physics_predicate() {
+        use uma_sim_primitives::race_support::{
+            build_field_snapshot, build_field_view, proximity_snapshots,
+        };
+
+        let mut race = pace_chaser_race(2);
+        race.prepare_round(99);
+        let horse_lane = race.course.horse_lane;
+
+        // R1 sits 3 m ahead of R0, dead in lane: inside the old 5 m token
+        // window, outside the documented 2 m one.
+        race.runners[0].position = 1000.0;
+        race.runners[0].current_lane = 0.0;
+        race.runners[1].position = 1003.0;
+        race.runners[1].current_lane = 0.0;
+
+        let snapshot = build_field_snapshot(
+            &mut race.runners,
+            &race.finished_runners,
+            &mut race.order_tracker,
+        );
+        let proximity = proximity_snapshots(&snapshot);
+
+        let front_block = front_blocking_runner(&race.runners[0], &proximity, horse_lane);
+        assert!(front_block.is_none());
+        let view = build_field_view(RunnerId(0), &snapshot, front_block.is_some());
+        assert!(!view.is_front_blocked);
+
+        // Pull R1 to 1 m ahead: inside the documented window, and both sides
+        // agree it blocks.
+        race.runners[1].position = 1001.0;
+        let snapshot = build_field_snapshot(
+            &mut race.runners,
+            &race.finished_runners,
+            &mut race.order_tracker,
+        );
+        let proximity = proximity_snapshots(&snapshot);
+        let front_block = front_blocking_runner(&race.runners[0], &proximity, horse_lane);
+        assert_eq!(front_block.map(|b| b.id), Some(RunnerId(1)));
+        let view = build_field_view(RunnerId(0), &snapshot, front_block.is_some());
+        assert!(view.is_front_blocked);
     }
 
     #[test]

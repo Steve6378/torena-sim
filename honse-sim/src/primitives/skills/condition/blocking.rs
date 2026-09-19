@@ -2,15 +2,21 @@
 //!
 //! Port of `full-sim/blocking-conditions.ts`. Each predicate inspects the
 //! observing runner plus the snapshots of every other active runner (read
-//! through [`RunnerView`]) to decide whether the runner is blocked in front, to
-//! the side, or actively overtaking.
+//! through [`RunnerView`]) to decide whether the runner is blocked to the side
+//! or actively overtaking.
+//!
+//! Front blocking is **not** recomputed here: the predicates read
+//! [`RunnerView::is_front_blocked`], the per-tick front-blocker the field
+//! producer already resolved with the documented rule (0 < DistanceGap < 2 m and
+//! `abs(LaneGap) <= (1.0 - 0.6 * DistanceGap / 2 m) * 0.75 HorseLane`, closest
+//! gap wins — mechanics § Front Blocking). This is the same state the physics
+//! speed cap and the replay's blocker column read, so a skill gated on being
+//! blocked in front cannot disagree with the blocking the race actually applied.
 
 use crate::skills::condition::dynamic::{
     bool_num, compare, register_dynamic_condition, DynamicCondition, RunnerView,
 };
 
-const FRONT_BLOCK_DISTANCE_METERS: f64 = 5.0;
-const FRONT_BLOCK_LANE_MULTIPLIER: f64 = 1.0;
 const SIDE_BLOCK_DISTANCE_METERS: f64 = 3.0;
 const SIDE_BLOCK_LANE_MULTIPLIER: f64 = 1.0;
 const OVERTAKE_DISTANCE_METERS: f64 = 5.0;
@@ -19,17 +25,6 @@ const MOVING_LANE_EPSILON: f64 = 0.00001;
 
 fn lane_threshold(runner: &dyn RunnerView, multiplier: f64) -> f64 {
     runner.horse_lane() * multiplier
-}
-
-fn has_front_blocking_runner(runner: &dyn RunnerView) -> bool {
-    let threshold = lane_threshold(runner, FRONT_BLOCK_LANE_MULTIPLIER);
-    runner.other_snapshots().iter().any(|snapshot| {
-        let distance_ahead = snapshot.position - runner.position();
-        let lane_delta = (snapshot.current_lane - runner.current_lane()).abs();
-        distance_ahead > 0.0
-            && distance_ahead <= FRONT_BLOCK_DISTANCE_METERS
-            && lane_delta <= threshold
-    })
 }
 
 /// `(left_blocked, right_blocked)` — whether a runner sits within the side-block
@@ -65,11 +60,6 @@ fn has_side_blocking_runner(runner: &dyn RunnerView) -> bool {
     left || right
 }
 
-fn has_all_side_blocking_runners(runner: &dyn RunnerView) -> bool {
-    let (left, right) = side_blocking_state(runner);
-    left && right
-}
-
 fn is_overtaking_runner(runner: &dyn RunnerView) -> bool {
     let threshold = lane_threshold(runner, OVERTAKE_LANE_MULTIPLIER);
     runner.other_snapshots().iter().any(|snapshot| {
@@ -93,24 +83,20 @@ fn continuous_time(runner: &dyn RunnerView, active: bool) -> f64 {
 /// Register every blocking / overtake dynamic condition.
 pub fn register_blocking_conditions() {
     register_dynamic_condition("blocked_front", |arg, cmp| {
-        DynamicCondition::new(move |r| {
-            compare(bool_num(has_front_blocking_runner(r)), arg as f64, cmp)
-        })
+        DynamicCondition::new(move |r| compare(bool_num(r.is_front_blocked()), arg as f64, cmp))
     });
 
     register_dynamic_condition("blocked_front_continuetime", |arg, cmp| {
         DynamicCondition::new(move |r| {
-            compare(
-                continuous_time(r, has_front_blocking_runner(r)),
-                arg as f64,
-                cmp,
-            )
+            compare(continuous_time(r, r.is_front_blocked()), arg as f64, cmp)
         })
     });
 
     register_dynamic_condition("blocked_all_continuetime", |arg, cmp| {
         DynamicCondition::new(move |r| {
-            let active = has_front_blocking_runner(r) && has_all_side_blocking_runners(r);
+            // "Blocked on all sides" means blocked in front and on at least
+            // one side (mechanics § Side Blocking), not on both flanks.
+            let active = r.is_front_blocked() && has_side_blocking_runner(r);
             compare(continuous_time(r, active), arg as f64, cmp)
         })
     });
@@ -175,6 +161,7 @@ mod tests {
         current_speed: f64,
         lane_change_speed: f64,
         accumulate_time: f64,
+        is_front_blocked: bool,
         snapshots: Vec<RunnerSnapshot>,
     }
 
@@ -196,6 +183,9 @@ mod tests {
         }
         fn accumulate_time(&self) -> f64 {
             self.accumulate_time
+        }
+        fn is_front_blocked(&self) -> bool {
+            self.is_front_blocked
         }
         fn other_snapshots(&self) -> Vec<RunnerSnapshot> {
             self.snapshots.clone()
@@ -221,32 +211,111 @@ mod tests {
         }
     }
 
+    /// The token reads the producer's per-tick front-blocker (mechanics § Front
+    /// Blocking), not a geometry of its own. It used to recompute the window at
+    /// 5 m / one full horse lane with no taper, so a runner 3 m ahead read as
+    /// blocked while the physics (and the game) had nobody blocking.
     #[test]
-    fn front_block_detects_close_runner_ahead_in_lane() {
+    fn blocked_front_reads_the_resolved_front_blocker() {
         register_blocking_conditions();
         let factory = get_dynamic_condition("blocked_front").expect("registered");
         let cond = factory(1, CmpKind::Eq);
 
         let blocked = TestRunner {
             position: 100.0,
-            snapshots: vec![snap(103.0, 0.0, 0.0)],
+            is_front_blocked: true,
             ..Default::default()
         };
         assert!(cond.eval(&blocked));
 
-        let too_far = TestRunner {
+        // 3 m ahead, dead in lane: inside the old 5 m window, outside the
+        // documented 2 m one. The producer resolved no blocker, so neither
+        // does the token.
+        let outside_documented_window = TestRunner {
             position: 100.0,
-            snapshots: vec![snap(110.0, 0.0, 0.0)],
+            is_front_blocked: false,
+            snapshots: vec![snap(103.0, 0.0, 0.0)],
             ..Default::default()
         };
-        assert!(!cond.eval(&too_far));
+        assert!(!cond.eval(&outside_documented_window));
 
-        let off_lane = TestRunner {
+        let clear = TestRunner {
             position: 100.0,
-            snapshots: vec![snap(103.0, 5.0, 0.0)],
             ..Default::default()
         };
-        assert!(!cond.eval(&off_lane));
+        assert!(!cond.eval(&clear));
+    }
+
+    #[test]
+    fn blocked_front_continuetime_reads_the_resolved_front_blocker() {
+        register_blocking_conditions();
+        let factory = get_dynamic_condition("blocked_front_continuetime").expect("registered");
+        let cond = factory(2, CmpKind::Gte);
+
+        let blocked = TestRunner {
+            position: 100.0,
+            accumulate_time: 9.0,
+            is_front_blocked: true,
+            ..Default::default()
+        };
+        assert!(cond.eval(&blocked));
+
+        let outside_documented_window = TestRunner {
+            position: 100.0,
+            accumulate_time: 9.0,
+            is_front_blocked: false,
+            snapshots: vec![snap(103.0, 0.0, 0.0)],
+            ..Default::default()
+        };
+        assert!(!cond.eval(&outside_documented_window));
+    }
+
+    /// "Blocked on all sides" is blocked in front and on **at least one** side
+    /// (mechanics § Side Blocking); it used to demand both flanks.
+    #[test]
+    fn blocked_all_continuetime_needs_front_and_one_side() {
+        register_blocking_conditions();
+        let factory = get_dynamic_condition("blocked_all_continuetime").expect("registered");
+        let cond = factory(2, CmpKind::Gte);
+
+        let front_and_left = TestRunner {
+            position: 100.0,
+            current_lane: 1.0,
+            accumulate_time: 9.0,
+            is_front_blocked: true,
+            snapshots: vec![snap(101.0, 0.5, 0.0)],
+            ..Default::default()
+        };
+        assert!(cond.eval(&front_and_left));
+
+        let front_and_right = TestRunner {
+            position: 100.0,
+            current_lane: 1.0,
+            accumulate_time: 9.0,
+            is_front_blocked: true,
+            snapshots: vec![snap(101.0, 1.5, 0.0)],
+            ..Default::default()
+        };
+        assert!(cond.eval(&front_and_right));
+
+        let side_only = TestRunner {
+            position: 100.0,
+            current_lane: 1.0,
+            accumulate_time: 9.0,
+            is_front_blocked: false,
+            snapshots: vec![snap(101.0, 0.5, 0.0)],
+            ..Default::default()
+        };
+        assert!(!cond.eval(&side_only));
+
+        let front_only = TestRunner {
+            position: 100.0,
+            current_lane: 1.0,
+            accumulate_time: 9.0,
+            is_front_blocked: true,
+            ..Default::default()
+        };
+        assert!(!cond.eval(&front_only));
     }
 
     #[test]
