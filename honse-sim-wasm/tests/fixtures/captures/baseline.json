@@ -13,7 +13,21 @@
       "hpMae": 40.96832298136646,
       "hpBias": 9.728732459167244,
       "rushedAgreement": 0.9928743961352657,
-      "laneMae": 1.0025038755176001
+      "laneMae": 1.0025038755176001,
+      "blockedShareDiff": 0.010628019323671498,
+      "rushedSpellLadderObserved": [
+        2.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.625,
+        0.0,
+        0.0,
+        0.125
+      ],
+      "rushedSpellDurationDiff": 1.5
     },
     "pinned": {
       "finishTimeMae": 0.21505917443169487,
@@ -28,7 +42,21 @@
       "hpMae": 28.92970853058572,
       "hpBias": -13.962359602710482,
       "rushedAgreement": 0.9987816764132553,
-      "laneMae": 0.9626143483709242
+      "laneMae": 0.9626143483709242,
+      "blockedShareDiff": 0.007977118722732757,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellDurationDiff": null
     }
   },
   "El Condor Pasa-74.4610s-20260831.json": {
@@ -42,10 +70,24 @@
       "trajectoryMae": 5.129602024610172,
       "speedMae": 0.208675925925926,
       "speedBias": 0.003611866969009985,
-      "hpMae": 41.15496661627614,
-      "hpBias": 17.364893550012603,
-      "rushedAgreement": 0.9921737213403881,
-      "laneMae": 1.0601096619897976
+      "hpMae": 40.976634542705966,
+      "hpBias": 17.74374842529605,
+      "rushedAgreement": 0.9925044091710759,
+      "laneMae": 1.0601096619897976,
+      "blockedShareDiff": 0.00837742504409171,
+      "rushedSpellLadderObserved": [
+        0.0,
+        1.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.375,
+        0.0,
+        0.125,
+        0.125
+      ],
+      "rushedSpellDurationDiff": 0.0
     },
     "pinned": {
       "finishTimeMae": 0.20992490980360243,
@@ -60,24 +102,52 @@
       "hpMae": 17.368649752114322,
       "hpBias": -8.947171186934964,
       "rushedAgreement": 0.9982502187226596,
-      "laneMae": 1.2605732166291757
+      "laneMae": 1.2605732166291757,
+      "blockedShareDiff": 0.020341207349081365,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellDurationDiff": null
     }
   },
   "Fine Motion-74.3042s-20260823.json": {
     "free": {
-      "finishTimeMae": 0.33498308393690324,
-      "finishTimeBias": 0.07859494951036242,
+      "finishTimeMae": 0.33405717213948566,
+      "finishTimeBias": 0.07766903771294488,
       "winnerHitRate": 0.25,
       "orderSpearman": 0.21458333333333335,
-      "spurtStartMae": 7.821109347873264,
+      "spurtStartMae": 7.823301527235243,
       "skillActivationError": 0.29039634146341464,
-      "trajectoryMae": 4.696060353152779,
-      "speedMae": 0.2493761174968074,
-      "speedBias": -0.0979893039591318,
-      "hpMae": 61.44071679438059,
-      "hpBias": -32.08725255427842,
-      "rushedAgreement": 0.991977969348659,
-      "laneMae": 1.6055057022270078
+      "trajectoryMae": 4.694408648743533,
+      "speedMae": 0.24963251459587688,
+      "speedBias": -0.09817967752235018,
+      "hpMae": 60.30511197774129,
+      "hpBias": -30.949116265280058,
+      "rushedAgreement": 0.9934147509578544,
+      "laneMae": 1.605598509339078,
+      "blockedShareDiff": 0.013362068965517244,
+      "rushedSpellLadderObserved": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.5,
+        0.25,
+        0.0,
+        0.125
+      ],
+      "rushedSpellDurationDiff": 2.1428571428571432
     },
     "pinned": {
       "finishTimeMae": 0.20066102345784506,
@@ -92,24 +162,52 @@
       "hpMae": 33.97505587484036,
       "hpBias": -24.801684227330778,
       "rushedAgreement": 0.9980842911877394,
-      "laneMae": 1.3928230513649416
+      "laneMae": 1.3928230513649416,
+      "blockedShareDiff": 0.0017560664112388272,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellDurationDiff": null
     }
   },
   "Fine Motion-74.4389s-20260823.json": {
     "free": {
-      "finishTimeMae": 0.2785220675998264,
-      "finishTimeBias": -0.1319664849175347,
+      "finishTimeMae": 0.29241106245252824,
+      "finishTimeBias": -0.1254847844441732,
       "winnerHitRate": 0.0,
-      "orderSpearman": 0.44375000000000003,
-      "spurtStartMae": 3.8114861382378473,
-      "skillActivationError": 0.2963235294117647,
-      "trajectoryMae": 4.194520184243229,
-      "speedMae": 0.22363136288998353,
-      "speedBias": 0.02204084564860441,
-      "hpMae": 18.742350848385332,
-      "hpBias": 4.434715380405035,
-      "rushedAgreement": 0.9940134099616859,
-      "laneMae": 0.9254847059729052
+      "orderSpearman": 0.4583333333333334,
+      "spurtStartMae": 0.5046810574001737,
+      "skillActivationError": 0.2933823529411765,
+      "trajectoryMae": 4.279517964714416,
+      "speedMae": 0.23073213145411425,
+      "speedBias": 0.017906803046889217,
+      "hpMae": 20.038120324758257,
+      "hpBias": 9.13168217478562,
+      "rushedAgreement": 0.9958093869731801,
+      "laneMae": 0.9091749858887523,
+      "blockedShareDiff": -0.010177203065134099,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.25,
+        0.25,
+        0.125,
+        0.125
+      ],
+      "rushedSpellDurationDiff": null
     },
     "pinned": {
       "finishTimeMae": 0.18994617462158203,
@@ -124,24 +222,52 @@
       "hpMae": 23.11115102171137,
       "hpBias": -15.305116538952745,
       "rushedAgreement": 1.0,
-      "laneMae": 0.9374183279453998
+      "laneMae": 0.9374183279453998,
+      "blockedShareDiff": 0.003352490421455939,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellDurationDiff": null
     }
   },
   "Fine Motion-74.9016s-20260831.json": {
     "free": {
-      "finishTimeMae": 0.2783710691663954,
-      "finishTimeBias": -0.17567496829562718,
+      "finishTimeMae": 0.2765192455715603,
+      "finishTimeBias": -0.20530456966824,
       "winnerHitRate": 0.0,
-      "orderSpearman": 0.6458333333333334,
-      "spurtStartMae": 6.61787584092882,
-      "skillActivationError": 0.1988255033557047,
-      "trajectoryMae": 5.693271286348331,
-      "speedMae": 0.30720825351213243,
-      "speedBias": 0.1304621077358146,
-      "hpMae": 42.31068691844554,
-      "hpBias": -7.09951423097975,
-      "rushedAgreement": 0.9972461685823755,
-      "laneMae": 0.947445209872744
+      "orderSpearman": 0.6875,
+      "spurtStartMae": 0.5109761555989584,
+      "skillActivationError": 0.20134228187919462,
+      "trajectoryMae": 5.390524174737183,
+      "speedMae": 0.2984938463308022,
+      "speedBias": 0.1328073959052224,
+      "hpMae": 41.74859673337936,
+      "hpBias": -6.900207039337471,
+      "rushedAgreement": 0.9979468599033816,
+      "laneMae": 0.9608217908902682,
+      "blockedShareDiff": -0.0044685990338164255,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.625,
+        0.125,
+        0.0,
+        0.0
+      ],
+      "rushedSpellDurationDiff": null
     },
     "pinned": {
       "finishTimeMae": 0.2379378212822808,
@@ -156,24 +282,52 @@
       "hpMae": 17.978703703703705,
       "hpBias": -8.18760639521509,
       "rushedAgreement": 1.0,
-      "laneMae": 0.8695885610766033
+      "laneMae": 0.8695885610766033,
+      "blockedShareDiff": -0.0010869565217391304,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellDurationDiff": null
     }
   },
   "Mayano Top Gun-74.1634s-20260823.json": {
     "free": {
-      "finishTimeMae": 0.3435400856865777,
-      "finishTimeBias": 0.05368455251057943,
+      "finishTimeMae": 0.36668819851345485,
+      "finishTimeBias": 0.08794360690646702,
       "winnerHitRate": 0.375,
-      "orderSpearman": 0.42708333333333337,
-      "spurtStartMae": 3.516759236653646,
-      "skillActivationError": 0.26319444444444445,
-      "trajectoryMae": 5.670399658497034,
-      "speedMae": 0.2796567129629634,
-      "speedBias": 0.029472145061728135,
-      "hpMae": 50.94856481481483,
-      "hpBias": 11.970061728395065,
-      "rushedAgreement": 0.9826388888888888,
-      "laneMae": 1.1233559635416692
+      "orderSpearman": 0.4,
+      "spurtStartMae": 3.561467488606771,
+      "skillActivationError": 0.2652777777777778,
+      "trajectoryMae": 5.7710610404785605,
+      "speedMae": 0.27650120149911855,
+      "speedBias": 0.012901752645502317,
+      "hpMae": 49.78130070546738,
+      "hpBias": 15.487678571428576,
+      "rushedAgreement": 0.9841435185185186,
+      "laneMae": 1.154391029265872,
+      "blockedShareDiff": -0.008333333333333333,
+      "rushedSpellLadderObserved": [
+        1.0,
+        0.0,
+        1.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.5,
+        0.375,
+        0.125,
+        0.25
+      ],
+      "rushedSpellDurationDiff": 0.2999999999999998
     },
     "pinned": {
       "finishTimeMae": 0.16285758548312718,
@@ -188,24 +342,52 @@
       "hpMae": 16.284871031746036,
       "hpBias": -5.797767857142856,
       "rushedAgreement": 0.997337962962963,
-      "laneMae": 0.9896185267857155
+      "laneMae": 0.9896185267857155,
+      "blockedShareDiff": -0.009375,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellDurationDiff": null
     }
   },
   "Mejiro Dober-74.8391s-20260831.json": {
     "free": {
-      "finishTimeMae": 0.41189564598931205,
-      "finishTimeBias": 0.03965833452012804,
+      "finishTimeMae": 0.41374757554796004,
+      "finishTimeBias": 0.04151026407877604,
       "winnerHitRate": 0.125,
-      "orderSpearman": 0.5479166666666667,
-      "spurtStartMae": 0.3587239583333333,
-      "skillActivationError": 0.2748397435897436,
-      "trajectoryMae": 7.818497646379695,
-      "speedMae": 0.324802598184713,
-      "speedBias": 0.10114965371875921,
-      "hpMae": 41.99108594657374,
-      "hpBias": 11.455883554867295,
-      "rushedAgreement": 0.9955962059620597,
-      "laneMae": 0.9981797135114211
+      "orderSpearman": 0.5458333333333334,
+      "spurtStartMae": 0.3553805881076389,
+      "skillActivationError": 0.27403846153846156,
+      "trajectoryMae": 7.829718018415162,
+      "speedMae": 0.32666461263819085,
+      "speedBias": 0.10081654622101763,
+      "hpMae": 41.8963479158601,
+      "hpBias": 12.032328902654108,
+      "rushedAgreement": 0.9962737127371274,
+      "laneMae": 0.996327706397601,
+      "blockedShareDiff": 0.012646793134598013,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.75,
+        0.125,
+        0.0,
+        0.125
+      ],
+      "rushedSpellDurationDiff": null
     },
     "pinned": {
       "finishTimeMae": 0.33203718397352433,
@@ -220,24 +402,52 @@
       "hpMae": 30.993595041322315,
       "hpBias": -0.4283057851239669,
       "rushedAgreement": 1.0,
-      "laneMae": 1.2172533832644625
+      "laneMae": 1.2172533832644625,
+      "blockedShareDiff": 0.015495867768595042,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellDurationDiff": null
     }
   },
   "Mejiro Palmer-74.7307s-20260831.json": {
     "free": {
-      "finishTimeMae": 0.2753862804836697,
-      "finishTimeBias": -0.13458516862657335,
+      "finishTimeMae": 0.27418994903564453,
+      "finishTimeBias": -0.11421468522813585,
       "winnerHitRate": 0.125,
-      "orderSpearman": 0.6604166666666667,
-      "spurtStartMae": 5.01004876030816,
-      "skillActivationError": 0.2590782122905028,
-      "trajectoryMae": 4.8656270072510175,
-      "speedMae": 0.26304367420517893,
-      "speedBias": 0.07053384136348771,
-      "hpMae": 35.19538675843985,
-      "hpBias": 17.89212553261225,
-      "rushedAgreement": 0.9827925270403146,
-      "laneMae": 1.3665525903392355
+      "orderSpearman": 0.7,
+      "spurtStartMae": 3.693303426106771,
+      "skillActivationError": 0.2639664804469274,
+      "trajectoryMae": 4.589776785382332,
+      "speedMae": 0.2595335812002482,
+      "speedBias": 0.07389496639496666,
+      "hpMae": 35.559857476524144,
+      "hpBias": 20.664366747700086,
+      "rushedAgreement": 0.9846096096096096,
+      "laneMae": 1.2959020270270283,
+      "blockedShareDiff": 0.0032532532532532532,
+      "rushedSpellLadderObserved": [
+        0.0,
+        2.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.375,
+        0.25,
+        0.25,
+        0.125
+      ],
+      "rushedSpellDurationDiff": 0.375
     },
     "pinned": {
       "finishTimeMae": 0.2072379853990343,
@@ -252,24 +462,52 @@
       "hpMae": 22.198546187078282,
       "hpBias": -12.613174117761279,
       "rushedAgreement": 0.9982161060142711,
-      "laneMae": 1.2782498771297524
+      "laneMae": 1.2782498771297524,
+      "blockedShareDiff": 0.010321100917431193,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellDurationDiff": null
     }
   },
   "Mihono Bourbon-74.2859s-20260831.json": {
     "free": {
       "finishTimeMae": 0.3326127794053819,
-      "finishTimeBias": -0.1266394721137153,
+      "finishTimeBias": -0.1414542728000217,
       "winnerHitRate": 0.625,
-      "orderSpearman": 0.7124999999999999,
-      "spurtStartMae": 13.288672553168404,
-      "skillActivationError": 0.21544117647058825,
-      "trajectoryMae": 7.477551366785811,
-      "speedMae": 0.29112139161220163,
-      "speedBias": 0.08006501906318088,
-      "hpMae": 45.640965413943405,
-      "hpBias": 9.317463235294118,
-      "rushedAgreement": 0.9926470588235294,
-      "laneMae": 1.300150543811277
+      "orderSpearman": 0.7083333333333333,
+      "spurtStartMae": 10.491843329535591,
+      "skillActivationError": 0.21838235294117647,
+      "trajectoryMae": 7.420342124233096,
+      "speedMae": 0.29523263888888895,
+      "speedBias": 0.11492081971677544,
+      "hpMae": 44.96283360566445,
+      "hpBias": 12.081624455337705,
+      "rushedAgreement": 0.9953022875816994,
+      "laneMae": 1.311062990196079,
+      "blockedShareDiff": -0.0005106209150326798,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.625,
+        0.5,
+        0.125,
+        0.0
+      ],
+      "rushedSpellDurationDiff": null
     },
     "pinned": {
       "finishTimeMae": 0.20588111877441406,
@@ -284,7 +522,21 @@
       "hpMae": 24.93249591503268,
       "hpBias": -15.635723039215685,
       "rushedAgreement": 1.0,
-      "laneMae": 1.2754944852941157
+      "laneMae": 1.2754944852941157,
+      "blockedShareDiff": 0.0010212418300653595,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellDurationDiff": null
     }
   },
   "Mihono Bourbon-74.5808s-20260831.json": {
@@ -293,15 +545,29 @@
       "finishTimeBias": -0.10273467169867621,
       "winnerHitRate": 0.25,
       "orderSpearman": 0.7020833333333334,
-      "spurtStartMae": 0.3863474527994792,
+      "spurtStartMae": 0.3820868598090278,
       "skillActivationError": 0.21045197740112995,
-      "trajectoryMae": 5.1350519959730905,
-      "speedMae": 0.2641171171171174,
-      "speedBias": 0.059676676676676595,
-      "hpMae": 36.8220970970971,
-      "hpBias": -6.016391391391393,
-      "rushedAgreement": 0.9888638638638638,
-      "laneMae": 0.5538325731981979
+      "trajectoryMae": 5.145622432284647,
+      "speedMae": 0.26427352352352396,
+      "speedBias": 0.05954529529529522,
+      "hpMae": 36.06639139139139,
+      "hpBias": -4.260835835835836,
+      "rushedAgreement": 0.9906156156156156,
+      "laneMae": 0.5481861768018019,
+      "blockedShareDiff": 0.0013763763763763764,
+      "rushedSpellLadderObserved": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.375,
+        0.25,
+        0.125,
+        0.25
+      ],
+      "rushedSpellDurationDiff": 3.75
     },
     "pinned": {
       "finishTimeMae": 0.2156717512342665,
@@ -316,24 +582,52 @@
       "hpMae": 23.2905328798186,
       "hpBias": -15.560126133786845,
       "rushedAgreement": 0.9987599206349206,
-      "laneMae": 0.6151317163584169
+      "laneMae": 0.6151317163584169,
+      "blockedShareDiff": 0.007688492063492063,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellDurationDiff": null
     }
   },
   "Narita Brian-74.3895s-20260830.json": {
     "free": {
-      "finishTimeMae": 0.28638744354248047,
-      "finishTimeBias": -0.09173297882080078,
-      "winnerHitRate": 0.375,
-      "orderSpearman": 0.6895833333333334,
-      "spurtStartMae": 0.3705579969618056,
-      "skillActivationError": 0.26226993865030673,
-      "trajectoryMae": 8.357627769159377,
-      "speedMae": 0.24832927818329342,
-      "speedBias": 0.11918781137759253,
-      "hpMae": 43.40707430579693,
-      "hpBias": -4.487935928629358,
-      "rushedAgreement": 0.9905717761557178,
-      "laneMae": 1.0004123327250578
+      "finishTimeMae": 0.2910173204210069,
+      "finishTimeBias": -0.10377015007866754,
+      "winnerHitRate": 0.5,
+      "orderSpearman": 0.6979166666666666,
+      "spurtStartMae": 0.2929026285807292,
+      "skillActivationError": 0.27070552147239263,
+      "trajectoryMae": 8.376727375114069,
+      "speedMae": 0.24922002085505823,
+      "speedBias": 0.120203394739891,
+      "hpMae": 44.05272853667015,
+      "hpBias": -1.6775460549183168,
+      "rushedAgreement": 0.9919910786699108,
+      "laneMae": 0.8391991462460879,
+      "blockedShareDiff": 0.007197891321978913,
+      "rushedSpellLadderObserved": [
+        2.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.25,
+        0.375,
+        0.125,
+        0.0
+      ],
+      "rushedSpellDurationDiff": 2.5
     },
     "pinned": {
       "finishTimeMae": 0.16461732652452257,
@@ -348,24 +642,52 @@
       "hpMae": 19.385073997392837,
       "hpBias": -12.905739590522199,
       "rushedAgreement": 0.9989935587761675,
-      "laneMae": 0.8550810364906857
+      "laneMae": 0.8550810364906857,
+      "blockedShareDiff": 0.0035225442834138487,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellDurationDiff": null
     }
   },
   "Narita Taishin-74.6592s-20260830.json": {
     "free": {
-      "finishTimeMae": 0.1980600357055664,
-      "finishTimeBias": -0.020709885491265193,
+      "finishTimeMae": 0.20731936560736763,
+      "finishTimeBias": -0.005895084804958767,
       "winnerHitRate": 0.0,
-      "orderSpearman": 0.6458333333333333,
-      "spurtStartMae": 0.5595160590277778,
-      "skillActivationError": 0.27125850340136054,
-      "trajectoryMae": 4.9944387441334674,
-      "speedMae": 0.1963146509341204,
-      "speedBias": 0.039497050147492406,
-      "hpMae": 27.658095706325792,
-      "hpBias": -14.79605047525402,
-      "rushedAgreement": 0.992133726647001,
-      "laneMae": 1.0764017422566385
+      "orderSpearman": 0.6291666666666667,
+      "spurtStartMae": 0.5063273111979166,
+      "skillActivationError": 0.2755102040816326,
+      "trajectoryMae": 4.9601323635659025,
+      "speedMae": 0.2034568642599609,
+      "speedBias": 0.03738901765229175,
+      "hpMae": 25.07808680994521,
+      "hpBias": -11.487135365453948,
+      "rushedAgreement": 0.9947148475909537,
+      "laneMae": 1.0242409687104899,
+      "blockedShareDiff": 0.009095378564405112,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.25,
+        0.375,
+        0.125,
+        0.125
+      ],
+      "rushedSpellDurationDiff": null
     },
     "pinned": {
       "finishTimeMae": 0.1754446029663086,
@@ -380,24 +702,52 @@
       "hpMae": 17.573125907196715,
       "hpBias": -7.0561642552793,
       "rushedAgreement": 1.0,
-      "laneMae": 0.9918154235145353
+      "laneMae": 0.9918154235145353,
+      "blockedShareDiff": 0.005408062930186824,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellDurationDiff": null
     }
   },
   "Nishino Flower-74.4822s-20260823.json": {
     "free": {
-      "finishTimeMae": 0.3616792890760634,
-      "finishTimeBias": -0.07757525973849827,
+      "finishTimeMae": 0.3450127707587348,
+      "finishTimeBias": -0.08498266008165148,
       "winnerHitRate": 0.75,
-      "orderSpearman": 0.45416666666666666,
-      "spurtStartMae": 0.3951195610894097,
-      "skillActivationError": 0.2426470588235294,
-      "trajectoryMae": 5.450504714603313,
-      "speedMae": 0.25762005649717534,
-      "speedBias": -0.07144774011299412,
-      "hpMae": 37.09828154425612,
-      "hpBias": 26.63390615191463,
-      "rushedAgreement": 0.9978813559322034,
-      "laneMae": 1.3367787782485876
+      "orderSpearman": 0.48125,
+      "spurtStartMae": 0.5111490885416666,
+      "skillActivationError": 0.24338235294117647,
+      "trajectoryMae": 5.384473304103458,
+      "speedMae": 0.2515858443188952,
+      "speedBias": -0.06722300690521008,
+      "hpMae": 36.67824074074073,
+      "hpBias": 26.730343691148782,
+      "rushedAgreement": 0.9982344632768362,
+      "laneMae": 1.3757641242937897,
+      "blockedShareDiff": -0.020205586942875078,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.375,
+        0.0,
+        0.125,
+        0.0
+      ],
+      "rushedSpellDurationDiff": null
     },
     "pinned": {
       "finishTimeMae": 0.1612698237101237,
@@ -412,7 +762,21 @@
       "hpMae": 20.194327731092436,
       "hpBias": -13.39670868347339,
       "rushedAgreement": 1.0,
-      "laneMae": 1.5587790178571412
+      "laneMae": 1.5587790178571412,
+      "blockedShareDiff": -0.011671335200746966,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellDurationDiff": null
     }
   },
   "Nishino Flower-74.8612s-20260831.json": {
@@ -426,10 +790,24 @@
       "trajectoryMae": 5.780175725844907,
       "speedMae": 0.25348544973544995,
       "speedBias": 0.09970403439153477,
-      "hpMae": 44.36594742063492,
-      "hpBias": 8.629670965608469,
-      "rushedAgreement": 0.9910714285714286,
-      "laneMae": 0.9850309244791686
+      "hpMae": 44.4140625,
+      "hpBias": 8.965236441798945,
+      "rushedAgreement": 0.9914434523809523,
+      "laneMae": 0.9850309244791686,
+      "blockedShareDiff": 0.014508928571428572,
+      "rushedSpellLadderObserved": [
+        0.0,
+        1.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.5,
+        0.0,
+        0.125,
+        0.0
+      ],
+      "rushedSpellDurationDiff": -1.7999999999999998
     },
     "pinned": {
       "finishTimeMae": 0.2043905258178711,
@@ -444,24 +822,52 @@
       "hpMae": 26.854208754208756,
       "hpBias": -23.247895622895623,
       "rushedAgreement": 0.9986111111111111,
-      "laneMae": 1.0497816761363634
+      "laneMae": 1.0497816761363634,
+      "blockedShareDiff": 0.012626262626262626,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellDurationDiff": null
     }
   },
   "Oguri Cap-74.2531s-20260831.json": {
     "free": {
-      "finishTimeMae": 0.2989059024386936,
-      "finishTimeBias": 0.24838998582628039,
-      "winnerHitRate": 0.375,
-      "orderSpearman": 0.7124999999999999,
-      "spurtStartMae": 1.8470696343315973,
+      "finishTimeMae": 0.28686883714463973,
+      "finishTimeBias": 0.23635292053222656,
+      "winnerHitRate": 0.25,
+      "orderSpearman": 0.7062499999999999,
+      "spurtStartMae": 1.8573472764756944,
       "skillActivationError": 0.25703125,
-      "trajectoryMae": 5.966383435222194,
-      "speedMae": 0.24484804106827857,
-      "speedBias": 0.003004818594104106,
-      "hpMae": 23.84469639707736,
-      "hpBias": 8.660896951373145,
-      "rushedAgreement": 0.9926146384479718,
-      "laneMae": 0.9000028840702933
+      "trajectoryMae": 5.930916873499396,
+      "speedMae": 0.2347367724867721,
+      "speedBias": 0.035750566893423805,
+      "hpMae": 22.526253464348695,
+      "hpBias": 9.808786848072561,
+      "rushedAgreement": 0.9931657848324515,
+      "laneMae": 0.8988660324546445,
+      "blockedShareDiff": 0.005007558578987149,
+      "rushedSpellLadderObserved": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.375,
+        0.125,
+        0.0,
+        0.25
+      ],
+      "rushedSpellDurationDiff": 3.5
     },
     "pinned": {
       "finishTimeMae": 0.1577755610148112,
@@ -476,24 +882,52 @@
       "hpMae": 14.8825743260267,
       "hpBias": -5.346280549256739,
       "rushedAgreement": 0.999889770723104,
-      "laneMae": 0.8323073696145117
+      "laneMae": 0.8323073696145117,
+      "blockedShareDiff": 0.006062610229276896,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellDurationDiff": null
     }
   },
   "Oguri Cap-74.2781s-20260831.json": {
     "free": {
-      "finishTimeMae": 0.2420657475789388,
-      "finishTimeBias": 0.08203644222683376,
+      "finishTimeMae": 0.24762143029106987,
+      "finishTimeBias": 0.06166617075602213,
       "winnerHitRate": 0.0,
-      "orderSpearman": 0.7604166666666665,
-      "spurtStartMae": 4.6834869384765625,
-      "skillActivationError": 0.23046875,
-      "trajectoryMae": 4.790974117380695,
-      "speedMae": 0.25511777777777767,
-      "speedBias": -0.03751555555555567,
-      "hpMae": 41.495444444444445,
-      "hpBias": 6.340333333333334,
-      "rushedAgreement": 0.9914444444444445,
-      "laneMae": 0.8909059999999996
+      "orderSpearman": 0.7625,
+      "spurtStartMae": 2.9063296847873263,
+      "skillActivationError": 0.2328125,
+      "trajectoryMae": 4.837928204755912,
+      "speedMae": 0.25049999999999933,
+      "speedBias": -0.03133111111111119,
+      "hpMae": 41.55988888888889,
+      "hpBias": 6.145,
+      "rushedAgreement": 0.9916666666666667,
+      "laneMae": 0.8746762500000017,
+      "blockedShareDiff": 0.0032222222222222222,
+      "rushedSpellLadderObserved": [
+        0.0,
+        1.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.75,
+        0.0,
+        0.125,
+        0.0
+      ],
+      "rushedSpellDurationDiff": -2.142857142857143
     },
     "pinned": {
       "finishTimeMae": 0.15410274929470485,
@@ -508,24 +942,52 @@
       "hpMae": 24.76100846560846,
       "hpBias": -17.932225396825395,
       "rushedAgreement": 0.9982222222222222,
-      "laneMae": 1.0038819630952396
+      "laneMae": 1.0038819630952396,
+      "blockedShareDiff": 0.01011111111111111,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellDurationDiff": null
     }
   },
   "Oguri Cap-74.3331s-20260831.json": {
     "free": {
-      "finishTimeMae": 0.32675351036919487,
-      "finishTimeBias": -0.1552419662475586,
+      "finishTimeMae": 0.3258274926079644,
+      "finishTimeBias": -0.15061230129665798,
       "winnerHitRate": 0.625,
-      "orderSpearman": 0.5583333333333333,
-      "spurtStartMae": 3.530420939127604,
-      "skillActivationError": 0.2423469387755102,
-      "trajectoryMae": 5.402186093688323,
-      "speedMae": 0.29797949735449736,
-      "speedBias": 0.07372023809523794,
-      "hpMae": 52.5601631393298,
-      "hpBias": 33.6478615520282,
-      "rushedAgreement": 0.9855599647266314,
-      "laneMae": 0.7100758184523839
+      "orderSpearman": 0.5520833333333334,
+      "spurtStartMae": 3.2056477864583335,
+      "skillActivationError": 0.2372448979591837,
+      "trajectoryMae": 5.405075650169418,
+      "speedMae": 0.3026604938271597,
+      "speedBias": 0.08746031746031765,
+      "hpMae": 53.99675925925925,
+      "hpBias": 35.954872134038794,
+      "rushedAgreement": 0.9878747795414462,
+      "laneMae": 0.7950956597222224,
+      "blockedShareDiff": 0.004409171075837742,
+      "rushedSpellLadderObserved": [
+        1.0,
+        1.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.25,
+        0.375,
+        0.25,
+        0.25
+      ],
+      "rushedSpellDurationDiff": 2.833333333333333
     },
     "pinned": {
       "finishTimeMae": 0.23147604200575086,
@@ -540,24 +1002,52 @@
       "hpMae": 19.423338162425463,
       "hpBias": -6.30384962627026,
       "rushedAgreement": 0.9964726631393298,
-      "laneMae": 0.6161716033635667
+      "laneMae": 0.6161716033635667,
+      "blockedShareDiff": 0.004519400352733686,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellDurationDiff": null
     }
   },
   "Oguri Cap-74.3391s-20260823.json": {
     "free": {
-      "finishTimeMae": 0.2762566672431098,
-      "finishTimeBias": 0.09888574812147352,
+      "finishTimeMae": 0.2669977611965603,
+      "finishTimeBias": 0.09703413645426433,
       "winnerHitRate": 0.125,
-      "orderSpearman": 0.6333333333333333,
-      "spurtStartMae": 0.3777533637152778,
+      "orderSpearman": 0.6395833333333334,
+      "spurtStartMae": 0.3576083713107639,
       "skillActivationError": 0.27391975308641975,
-      "trajectoryMae": 5.383075005017971,
-      "speedMae": 0.228919438145628,
-      "speedBias": -0.049263983371126356,
-      "hpMae": 39.34459246661628,
-      "hpBias": 20.031037414965986,
-      "rushedAgreement": 0.9934964726631393,
-      "laneMae": 0.7924537627551003
+      "trajectoryMae": 5.316205346218873,
+      "speedMae": 0.2374146510456038,
+      "speedBias": -0.061590136054421804,
+      "hpMae": 37.58396321491559,
+      "hpBias": 19.38662131519274,
+      "rushedAgreement": 0.9944885361552028,
+      "laneMae": 0.8486781462585027,
+      "blockedShareDiff": -0.005952380952380952,
+      "rushedSpellLadderObserved": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.5,
+        0.125,
+        0.125,
+        0.0
+      ],
+      "rushedSpellDurationDiff": 1.5
     },
     "pinned": {
       "finishTimeMae": 0.16936588287353516,
@@ -572,24 +1062,52 @@
       "hpMae": 23.16521269001428,
       "hpBias": -16.717534853447553,
       "rushedAgreement": 1.0,
-      "laneMae": 0.7434551977040811
+      "laneMae": 0.7434551977040811,
+      "blockedShareDiff": -0.014991181657848324,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellDurationDiff": null
     }
   },
   "Oguri Cap-74.3566s-20260830.json": {
     "free": {
-      "finishTimeMae": 0.2828634050157335,
-      "finishTimeBias": 0.06065262688530816,
+      "finishTimeMae": 0.26872846815321183,
+      "finishTimeBias": 0.026393466525607638,
       "winnerHitRate": 0.125,
-      "orderSpearman": 0.6791666666666666,
-      "spurtStartMae": 6.607323540581597,
-      "skillActivationError": 0.1998502994011976,
-      "trajectoryMae": 6.258171472377476,
-      "speedMae": 0.2504339884101787,
-      "speedBias": -0.026415280927185484,
-      "hpMae": 61.14166666666666,
-      "hpBias": 22.172486772486774,
-      "rushedAgreement": 0.9880952380952381,
-      "laneMae": 1.358426155045351
+      "orderSpearman": 0.6979166666666665,
+      "spurtStartMae": 0.7701839870876737,
+      "skillActivationError": 0.1968562874251497,
+      "trajectoryMae": 6.136240805182997,
+      "speedMae": 0.24687190308221987,
+      "speedBias": -0.013947173931300573,
+      "hpMae": 59.778224993701194,
+      "hpBias": 24.031664147140344,
+      "rushedAgreement": 0.9902998236331569,
+      "laneMae": 1.2729290863567686,
+      "blockedShareDiff": 0.0036375661375661374,
+      "rushedSpellLadderObserved": [
+        0.0,
+        1.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.875,
+        0.25,
+        0.125,
+        0.0
+      ],
+      "rushedSpellDurationDiff": -1.7999999999999998
     },
     "pinned": {
       "finishTimeMae": 0.21503999498155382,
@@ -604,24 +1122,52 @@
       "hpMae": 16.892268203577732,
       "hpBias": -5.641795792391031,
       "rushedAgreement": 0.9993386243386243,
-      "laneMae": 1.1268728351757373
+      "laneMae": 1.1268728351757373,
+      "blockedShareDiff": 0.012014991181657848,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellDurationDiff": null
     }
   },
   "Oguri Cap-74.5212s-20260831.json": {
     "free": {
-      "finishTimeMae": 0.4809306462605794,
-      "finishTimeBias": -0.2712458504570855,
+      "finishTimeMae": 0.48093075222439235,
+      "finishTimeBias": -0.27124595642089844,
       "winnerHitRate": 0.375,
-      "orderSpearman": 0.7916666666666665,
-      "spurtStartMae": 2.548650105794271,
+      "orderSpearman": 0.7895833333333333,
+      "spurtStartMae": 0.4709913465711806,
       "skillActivationError": 0.30800653594771243,
-      "trajectoryMae": 8.000547668742815,
-      "speedMae": 0.3192740130240129,
-      "speedBias": 0.1833742029575357,
-      "hpMae": 62.25183150183151,
-      "hpBias": 20.06308506308506,
-      "rushedAgreement": 0.9819563152896487,
-      "laneMae": 0.8962412622100102
+      "trajectoryMae": 8.014883801582641,
+      "speedMae": 0.31540954415954375,
+      "speedBias": 0.18130698005697962,
+      "hpMae": 62.30761316872429,
+      "hpBias": 21.71660335549224,
+      "rushedAgreement": 0.98338081671415,
+      "laneMae": 0.8989158653846164,
+      "blockedShareDiff": -0.01638176638176638,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        1.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.75,
+        0.125,
+        0.25,
+        0.25
+      ],
+      "rushedSpellDurationDiff": -3.0
     },
     "pinned": {
       "finishTimeMae": 0.40688196818033856,
@@ -636,24 +1182,52 @@
       "hpMae": 27.63603040086091,
       "hpBias": -21.292103847188592,
       "rushedAgreement": 0.9997645951035782,
-      "laneMae": 1.0212252320419661
+      "laneMae": 1.0212252320419661,
+      "blockedShareDiff": -0.02024482109227872,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellDurationDiff": null
     }
   },
   "Oguri Cap-74.5276s-20260831.json": {
     "free": {
-      "finishTimeMae": 0.2196570502387153,
-      "finishTimeBias": 0.11699083116319445,
-      "winnerHitRate": 0.625,
-      "orderSpearman": 0.7833333333333333,
-      "spurtStartMae": 9.049523247612846,
-      "skillActivationError": 0.29667721518987344,
-      "trajectoryMae": 5.039317562843544,
-      "speedMae": 0.24883831998876318,
-      "speedBias": 0.029020578732968188,
-      "hpMae": 55.37624666385727,
-      "hpBias": 19.793545441775525,
-      "rushedAgreement": 0.9834070796460177,
-      "laneMae": 1.2552929045512045
+      "finishTimeMae": 0.2354066636827257,
+      "finishTimeBias": 0.1132871839735243,
+      "winnerHitRate": 0.75,
+      "orderSpearman": 0.7583333333333333,
+      "spurtStartMae": 6.52259996202257,
+      "skillActivationError": 0.2958860759493671,
+      "trajectoryMae": 5.234824376802729,
+      "speedMae": 0.24680467762326197,
+      "speedBias": 0.04276092147773569,
+      "hpMae": 56.28803202697007,
+      "hpBias": 24.469412838881865,
+      "rushedAgreement": 0.987708947885939,
+      "laneMae": 1.241591438843233,
+      "blockedShareDiff": 0.017576204523107177,
+      "rushedSpellLadderObserved": [
+        2.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.125,
+        0.625,
+        0.125,
+        0.125
+      ],
+      "rushedSpellDurationDiff": 3.75
     },
     "pinned": {
       "finishTimeMae": 0.2273765140109592,
@@ -668,24 +1242,52 @@
       "hpMae": 17.837797619047628,
       "hpBias": 2.6015211640211655,
       "rushedAgreement": 0.996031746031746,
-      "laneMae": 0.8471024460565487
+      "laneMae": 0.8471024460565487,
+      "blockedShareDiff": 0.018105158730158732,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellDurationDiff": null
     }
   },
   "Oguri Cap-74.5545s-20260831.json": {
     "free": {
-      "finishTimeMae": 0.22812037997775608,
-      "finishTimeBias": -0.02175034417046441,
+      "finishTimeMae": 0.2420093748304579,
+      "finishTimeBias": -0.02267636193169488,
       "winnerHitRate": 0.125,
-      "orderSpearman": 0.64375,
-      "spurtStartMae": 0.5779622395833334,
-      "skillActivationError": 0.2578125,
-      "trajectoryMae": 5.153166897441328,
-      "speedMae": 0.23047980755724115,
-      "speedBias": 0.027154340497260784,
-      "hpMae": 40.809527321253,
-      "hpBias": 10.02793580559067,
-      "rushedAgreement": 0.9968043264503441,
-      "laneMae": 0.7688967959860936
+      "orderSpearman": 0.6208333333333333,
+      "spurtStartMae": 0.5710550944010416,
+      "skillActivationError": 0.26015625,
+      "trajectoryMae": 5.188823232872542,
+      "speedMae": 0.22696614693074807,
+      "speedBias": 0.03953230790841389,
+      "hpMae": 40.03301376597837,
+      "hpBias": 11.243801798005338,
+      "rushedAgreement": 0.9974188790560472,
+      "laneMae": 0.7545961085651076,
+      "blockedShareDiff": -0.003933136676499509,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.625,
+        0.125,
+        0.0,
+        0.0
+      ],
+      "rushedSpellDurationDiff": null
     },
     "pinned": {
       "finishTimeMae": 0.15589788224962023,
@@ -700,24 +1302,52 @@
       "hpMae": 21.73388912095052,
       "hpBias": -11.655997632971317,
       "rushedAgreement": 1.0,
-      "laneMae": 0.8636038076963278
+      "laneMae": 0.8636038076963278,
+      "blockedShareDiff": -0.00024366471734892786,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellDurationDiff": null
     }
   },
   "Oguri Cap-74.6380s-20260831.json": {
     "free": {
-      "finishTimeMae": 0.4501853519015842,
-      "finishTimeBias": 0.08025572035047743,
+      "finishTimeMae": 0.45481512281629777,
+      "finishTimeBias": 0.07747777303059895,
       "winnerHitRate": 0.0,
-      "orderSpearman": 0.41458333333333336,
-      "spurtStartMae": 0.4412095811631944,
-      "skillActivationError": 0.2636986301369863,
-      "trajectoryMae": 7.237801450823917,
-      "speedMae": 0.2349126409017713,
-      "speedBias": -0.007849838969404496,
-      "hpMae": 61.41595813204508,
-      "hpBias": 31.16231884057971,
-      "rushedAgreement": 0.9748792270531401,
-      "laneMae": 0.8737550996376833
+      "orderSpearman": 0.39583333333333337,
+      "spurtStartMae": 0.4375881618923611,
+      "skillActivationError": 0.2585616438356164,
+      "trajectoryMae": 7.238479000088428,
+      "speedMae": 0.2410846215781,
+      "speedBias": -0.0002377616747186029,
+      "hpMae": 60.67762479871175,
+      "hpBias": 31.96509661835749,
+      "rushedAgreement": 0.9760869565217392,
+      "laneMae": 0.8788345833333366,
+      "blockedShareDiff": -0.0036231884057971015,
+      "rushedSpellLadderObserved": [
+        1.0,
+        0.0,
+        2.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.5,
+        0.125,
+        0.0,
+        0.125
+      ],
+      "rushedSpellDurationDiff": -2.0
     },
     "pinned": {
       "finishTimeMae": 0.24923939175075954,
@@ -732,24 +1362,52 @@
       "hpMae": 19.90667641325536,
       "hpBias": -13.608430799220272,
       "rushedAgreement": 0.9958576998050682,
-      "laneMae": 1.0865867141812853
+      "laneMae": 1.0865867141812853,
+      "blockedShareDiff": 0.004629629629629629,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellDurationDiff": null
     }
   },
   "Oguri Cap-74.6403s-20260831.json": {
     "free": {
-      "finishTimeMae": 0.38595220777723527,
-      "finishTimeBias": -0.006276024712456597,
+      "finishTimeMae": 0.37113751305474174,
+      "finishTimeBias": -0.006275918748643663,
       "winnerHitRate": 0.5,
-      "orderSpearman": 0.4625,
-      "spurtStartMae": 0.5961286756727431,
-      "skillActivationError": 0.2867647058823529,
-      "trajectoryMae": 5.845460472659217,
-      "speedMae": 0.307127389294056,
-      "speedBias": 0.07732837599504293,
-      "hpMae": 42.98372300872301,
-      "hpBias": 14.35489417989417,
-      "rushedAgreement": 0.992992992992993,
-      "laneMae": 1.0717786049442277
+      "orderSpearman": 0.4708333333333333,
+      "spurtStartMae": 0.6181013319227431,
+      "skillActivationError": 0.2900326797385621,
+      "trajectoryMae": 5.800563665451618,
+      "speedMae": 0.3040615019781688,
+      "speedBias": 0.07638282329949035,
+      "hpMae": 43.30049096715763,
+      "hpBias": 16.254919204919197,
+      "rushedAgreement": 0.9948698698698699,
+      "laneMae": 1.0914441240347468,
+      "blockedShareDiff": 0.018518518518518517,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.875,
+        0.25,
+        0.125,
+        0.0
+      ],
+      "rushedSpellDurationDiff": null
     },
     "pinned": {
       "finishTimeMae": 0.17794746822781032,
@@ -764,24 +1422,52 @@
       "hpMae": 18.78611111111111,
       "hpBias": -10.411936936936936,
       "rushedAgreement": 1.0,
-      "laneMae": 1.0290068693693695
+      "laneMae": 1.0290068693693695,
+      "blockedShareDiff": 0.013388388388388388,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellDurationDiff": null
     }
   },
   "Oguri Cap-74.6538s-20260831.json": {
     "free": {
-      "finishTimeMae": 0.29141712188720703,
-      "finishTimeBias": -0.1330768797132704,
-      "winnerHitRate": 0.125,
-      "orderSpearman": 0.75,
-      "spurtStartMae": 1.1070285373263888,
-      "skillActivationError": 0.23317307692307693,
-      "trajectoryMae": 6.226687711544216,
-      "speedMae": 0.24760233387140154,
-      "speedBias": 0.06495633799659187,
-      "hpMae": 52.93310577526677,
-      "hpBias": 2.9284156129495122,
-      "rushedAgreement": 0.9911723163841808,
-      "laneMae": 0.9316120106941064
+      "finishTimeMae": 0.2687986161973741,
+      "finishTimeBias": -0.1256694793701172,
+      "winnerHitRate": 0.25,
+      "orderSpearman": 0.7916666666666665,
+      "spurtStartMae": 0.9391140407986112,
+      "skillActivationError": 0.2299679487179487,
+      "trajectoryMae": 6.062267389395231,
+      "speedMae": 0.24168459106806603,
+      "speedBias": 0.06433016097210986,
+      "hpMae": 53.749129001883226,
+      "hpBias": 5.493015200430454,
+      "rushedAgreement": 0.9925847457627118,
+      "laneMae": 0.9895622818301054,
+      "blockedShareDiff": -0.00023540489642184556,
+      "rushedSpellLadderObserved": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.75,
+        0.125,
+        0.25,
+        0.0
+      ],
+      "rushedSpellDurationDiff": 1.666666666666667
     },
     "pinned": {
       "finishTimeMae": 0.21150472429063585,
@@ -796,24 +1482,52 @@
       "hpMae": 18.424576271186446,
       "hpBias": -9.958819836785935,
       "rushedAgreement": 1.0,
-      "laneMae": 0.8499532662429412
+      "laneMae": 0.8499532662429412,
+      "blockedShareDiff": 0.001647834274952919,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellDurationDiff": null
     }
   },
   "Oguri Cap-74.6961s-20260831.json": {
     "free": {
-      "finishTimeMae": 0.3141767713758681,
-      "finishTimeBias": -0.045722749498155385,
-      "winnerHitRate": 0.625,
-      "orderSpearman": 0.41041666666666676,
-      "spurtStartMae": 2.3809678819444446,
-      "skillActivationError": 0.279874213836478,
-      "trajectoryMae": 5.25203592800583,
-      "speedMae": 0.23128915107709708,
-      "speedBias": 0.015671001039304733,
-      "hpMae": 32.41369638133031,
-      "hpBias": 15.975853883219953,
-      "rushedAgreement": 0.980530753968254,
-      "laneMae": 1.0750292304421754
+      "finishTimeMae": 0.3299173778957791,
+      "finishTimeBias": -0.02442667219373915,
+      "winnerHitRate": 0.375,
+      "orderSpearman": 0.4208333333333334,
+      "spurtStartMae": 0.3096364339192708,
+      "skillActivationError": 0.2893081761006289,
+      "trajectoryMae": 5.062851325696583,
+      "speedMae": 0.24004794973545004,
+      "speedBias": 0.016311177248677373,
+      "hpMae": 33.78864914021165,
+      "hpBias": 21.331225198412696,
+      "rushedAgreement": 0.9825148809523809,
+      "laneMae": 1.0122426525297612,
+      "blockedShareDiff": -0.004464285714285714,
+      "rushedSpellLadderObserved": [
+        0.0,
+        1.0,
+        1.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.375,
+        0.625,
+        0.0,
+        0.0
+      ],
+      "rushedSpellDurationDiff": -2.625
     },
     "pinned": {
       "finishTimeMae": 0.21204068925645617,
@@ -828,24 +1542,52 @@
       "hpMae": 17.631985780423282,
       "hpBias": -8.176793981481481,
       "rushedAgreement": 0.9977678571428571,
-      "laneMae": 1.0782409319196395
+      "laneMae": 1.0782409319196395,
+      "blockedShareDiff": -0.000248015873015873,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellDurationDiff": null
     }
   },
   "Oguri Cap-74.8158s-20260831.json": {
     "free": {
-      "finishTimeMae": 0.3355902565850152,
-      "finishTimeBias": 0.006006770663791233,
+      "finishTimeMae": 0.32540501488579643,
+      "finishTimeBias": 0.02359951866997613,
       "winnerHitRate": 0.0,
-      "orderSpearman": 0.3458333333333333,
-      "spurtStartMae": 0.4136166042751736,
-      "skillActivationError": 0.275,
-      "trajectoryMae": 5.6364056757963805,
-      "speedMae": 0.22418519678826673,
-      "speedBias": -0.014807957393483761,
-      "hpMae": 41.371298616912654,
-      "hpBias": 13.893708809059689,
-      "rushedAgreement": 0.9886695906432749,
-      "laneMae": 0.904180541196744
+      "orderSpearman": 0.35,
+      "spurtStartMae": 0.4128028021918403,
+      "skillActivationError": 0.2717741935483871,
+      "trajectoryMae": 5.641982086654924,
+      "speedMae": 0.22961245706859726,
+      "speedBias": -0.021735867446393664,
+      "hpMae": 43.398421980878126,
+      "hpBias": 17.420535134131622,
+      "rushedAgreement": 0.991349902534113,
+      "laneMae": 0.8942224193295729,
+      "blockedShareDiff": -0.005847953216374269,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.625,
+        0.375,
+        0.25,
+        0.25
+      ],
+      "rushedSpellDurationDiff": null
     },
     "pinned": {
       "finishTimeMae": 0.21077007717556423,
@@ -860,24 +1602,52 @@
       "hpMae": 19.741980820105816,
       "hpBias": -3.7247850529100535,
       "rushedAgreement": 1.0,
-      "laneMae": 0.7740757068452412
+      "laneMae": 0.7740757068452412,
+      "blockedShareDiff": -0.011532738095238096,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellDurationDiff": null
     }
   },
   "Oguri Cap-74.9062s-20260830.json": {
     "free": {
-      "finishTimeMae": 0.2460788091023763,
-      "finishTimeBias": -0.22939777374267578,
+      "finishTimeMae": 0.24793063269721138,
+      "finishTimeBias": -0.21828683217366537,
       "winnerHitRate": 0.25,
-      "orderSpearman": 0.8145833333333334,
-      "spurtStartMae": 2.31463623046875,
-      "skillActivationError": 0.2730891719745223,
-      "trajectoryMae": 4.504301470372104,
-      "speedMae": 0.21725833450391016,
-      "speedBias": 0.05888964976354386,
-      "hpMae": 58.22693964508124,
-      "hpBias": -5.517488411293724,
-      "rushedAgreement": 0.9873402163225172,
-      "laneMae": 1.0175782501053465
+      "orderSpearman": 0.8208333333333333,
+      "spurtStartMae": 0.3950686984592014,
+      "skillActivationError": 0.2746815286624204,
+      "trajectoryMae": 4.444553582971705,
+      "speedMae": 0.22485853584304855,
+      "speedBias": 0.05644572037271197,
+      "hpMae": 57.13781195860841,
+      "hpBias": -2.083789858126142,
+      "rushedAgreement": 0.98992133726647,
+      "laneMae": 0.8991282329856722,
+      "blockedShareDiff": 0.010816125860373648,
+      "rushedSpellLadderObserved": [
+        0.0,
+        1.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.5,
+        0.375,
+        0.125,
+        0.125
+      ],
+      "rushedSpellDurationDiff": -0.33333333333333304
     },
     "pinned": {
       "finishTimeMae": 0.11768457624647352,
@@ -892,24 +1662,52 @@
       "hpMae": 16.333448355187485,
       "hpBias": -8.867356797791583,
       "rushedAgreement": 0.9983091787439613,
-      "laneMae": 1.2772342908902694
+      "laneMae": 1.2772342908902694,
+      "blockedShareDiff": 0.003140096618357488,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellDurationDiff": null
     }
   },
   "Oguri Cap-74.9342s-20260830.json": {
     "free": {
-      "finishTimeMae": 0.2656833860609267,
-      "finishTimeBias": -0.127806027730306,
+      "finishTimeMae": 0.2691330379909939,
+      "finishTimeBias": -0.1352134280734592,
       "winnerHitRate": 0.25,
-      "orderSpearman": 0.4979166666666666,
-      "spurtStartMae": 0.4388987223307292,
+      "orderSpearman": 0.4958333333333333,
+      "spurtStartMae": 0.4345126681857639,
       "skillActivationError": 0.26774691358024694,
-      "trajectoryMae": 5.287489231053395,
-      "speedMae": 0.25190441073184494,
-      "speedBias": 0.012289998595308582,
-      "hpMae": 50.27223509856252,
-      "hpBias": -15.25628014234209,
-      "rushedAgreement": 0.9936086529006883,
-      "laneMae": 1.2608610737989885
+      "trajectoryMae": 5.295535770175703,
+      "speedMae": 0.2505032893196616,
+      "speedBias": 0.016444549796319926,
+      "hpMae": 49.779615582712935,
+      "hpBias": -14.672496137097907,
+      "rushedAgreement": 0.994346116027532,
+      "laneMae": 1.2477578289612299,
+      "blockedShareDiff": -0.005285152409046214,
+      "rushedSpellLadderObserved": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.75,
+        0.125,
+        0.0,
+        0.0
+      ],
+      "rushedSpellDurationDiff": 0.4285714285714284
     },
     "pinned": {
       "finishTimeMae": 0.24864673614501953,
@@ -924,24 +1722,52 @@
       "hpMae": 25.78660570508397,
       "hpBias": -14.554583620887966,
       "rushedAgreement": 0.9992753623188406,
-      "laneMae": 1.34151121247412
+      "laneMae": 1.34151121247412,
+      "blockedShareDiff": -0.0024154589371980675,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellDurationDiff": null
     }
   },
   "Oguri Cap-74.9537s-20260831.json": {
     "free": {
-      "finishTimeMae": 0.3107467227511936,
-      "finishTimeBias": -0.17425770229763454,
-      "winnerHitRate": 0.5,
-      "orderSpearman": 0.5958333333333333,
-      "spurtStartMae": 5.037750244140625,
-      "skillActivationError": 0.30095541401273884,
-      "trajectoryMae": 5.2333598234767456,
-      "speedMae": 0.28840722495894894,
-      "speedBias": 0.05536501094690738,
-      "hpMae": 38.67589741835432,
-      "hpBias": -12.914175104907862,
-      "rushedAgreement": 0.9798850574712644,
-      "laneMae": 1.0032540409482784
+      "finishTimeMae": 0.29226864708794487,
+      "finishTimeBias": -0.171479860941569,
+      "winnerHitRate": 0.625,
+      "orderSpearman": 0.6020833333333333,
+      "spurtStartMae": 5.014092339409722,
+      "skillActivationError": 0.3017515923566879,
+      "trajectoryMae": 5.097946516842202,
+      "speedMae": 0.2850092364532019,
+      "speedBias": 0.05932744937055264,
+      "hpMae": 39.085944626892896,
+      "hpBias": -11.16318874293012,
+      "rushedAgreement": 0.9810823754789272,
+      "laneMae": 0.9841863775143695,
+      "blockedShareDiff": -0.0038314176245210726,
+      "rushedSpellLadderObserved": [
+        0.0,
+        1.0,
+        0.0,
+        1.0
+      ],
+      "rushedSpellLadderSim": [
+        0.5,
+        0.125,
+        0.0,
+        0.125
+      ],
+      "rushedSpellDurationDiff": -4.0
     },
     "pinned": {
       "finishTimeMae": 0.31160852644178605,
@@ -956,24 +1782,52 @@
       "hpMae": 27.281194885361547,
       "hpBias": -21.792647127076947,
       "rushedAgreement": 0.9975633528265108,
-      "laneMae": 0.9284239178675842
+      "laneMae": 0.9284239178675842,
+      "blockedShareDiff": -0.006700779727095516,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellDurationDiff": null
     }
   },
   "Oguri Cap-75.0204s-20260831.json": {
     "free": {
-      "finishTimeMae": 0.22727987501356336,
-      "finishTimeBias": -0.05173132154676649,
+      "finishTimeMae": 0.21400695376926,
+      "finishTimeBias": -0.05543465084499783,
       "winnerHitRate": 0.75,
-      "orderSpearman": 0.7583333333333334,
-      "spurtStartMae": 9.516264173719618,
-      "skillActivationError": 0.27056962025316456,
-      "trajectoryMae": 4.413532602378954,
-      "speedMae": 0.2980700161420497,
-      "speedBias": 0.14273204196933018,
-      "hpMae": 52.47171778315846,
-      "hpBias": 10.628093892924403,
-      "rushedAgreement": 0.9838747645951036,
-      "laneMae": 0.9452141911319589
+      "orderSpearman": 0.7937500000000001,
+      "spurtStartMae": 8.574054294162327,
+      "skillActivationError": 0.2697784810126582,
+      "trajectoryMae": 4.301347062055066,
+      "speedMae": 0.29496351224105444,
+      "speedBias": 0.14446366917765235,
+      "hpMae": 50.8242702448211,
+      "hpBias": 12.924081920903957,
+      "rushedAgreement": 0.984816384180791,
+      "laneMae": 1.0679216101694908,
+      "blockedShareDiff": 0.01224105461393597,
+      "rushedSpellLadderObserved": [
+        0.0,
+        2.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.5,
+        0.125,
+        0.125,
+        0.25
+      ],
+      "rushedSpellDurationDiff": 0.375
     },
     "pinned": {
       "finishTimeMae": 0.2431217829386393,
@@ -988,24 +1842,52 @@
       "hpMae": 19.919476100031655,
       "hpBias": -11.104898702120925,
       "rushedAgreement": 0.997269705603039,
-      "laneMae": 0.9682712339743591
+      "laneMae": 0.9682712339743591,
+      "blockedShareDiff": 0.023266856600189935,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellDurationDiff": null
     }
   },
   "Silence Suzuka-74.0926s-20260902.json": {
     "free": {
-      "finishTimeMae": 0.3064236111111111,
-      "finishTimeBias": 0.12036556667751735,
+      "finishTimeMae": 0.30271996392144096,
+      "finishTimeBias": 0.11110623677571614,
       "winnerHitRate": 0.125,
-      "orderSpearman": 0.41875,
-      "spurtStartMae": 0.4586452907986111,
-      "skillActivationError": 0.2359467455621302,
-      "trajectoryMae": 6.012264526313709,
-      "speedMae": 0.2584919060216689,
-      "speedBias": 0.007109210968338169,
-      "hpMae": 39.29703115814226,
-      "hpBias": 9.80060048710842,
-      "rushedAgreement": 0.9908509700176367,
-      "laneMae": 1.0094290497448961
+      "orderSpearman": 0.42291666666666666,
+      "spurtStartMae": 0.4585588243272569,
+      "skillActivationError": 0.23668639053254437,
+      "trajectoryMae": 5.992325899516149,
+      "speedMae": 0.25284360040312526,
+      "speedBias": 0.017007957503989528,
+      "hpMae": 39.59660808767947,
+      "hpBias": 11.03249664063156,
+      "rushedAgreement": 0.9921737213403881,
+      "laneMae": 1.0100704069822353,
+      "blockedShareDiff": 0.0034171075837742503,
+      "rushedSpellLadderObserved": [
+        0.0,
+        1.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.5,
+        0.125,
+        0.25,
+        0.0
+      ],
+      "rushedSpellDurationDiff": -0.8571428571428568
     },
     "pinned": {
       "finishTimeMae": 0.2214432822333442,
@@ -1020,24 +1902,52 @@
       "hpMae": 22.369113756613753,
       "hpBias": -13.872200176366844,
       "rushedAgreement": 0.9982363315696648,
-      "laneMae": 0.95552512400793
+      "laneMae": 0.95552512400793,
+      "blockedShareDiff": -0.0007716049382716049,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellDurationDiff": null
     }
   },
   "Silence Suzuka-74.2955s-20260831.json": {
     "free": {
-      "finishTimeMae": 0.2723253038194444,
+      "finishTimeMae": 0.26862165662977433,
       "finishTimeBias": -0.026871575249565974,
       "winnerHitRate": 0.125,
-      "orderSpearman": 0.5812499999999999,
-      "spurtStartMae": 3.610744900173611,
-      "skillActivationError": 0.22127329192546583,
-      "trajectoryMae": 5.254552336370294,
-      "speedMae": 0.25538079365079375,
-      "speedBias": 0.07366947089947073,
-      "hpMae": 35.7285291005291,
-      "hpBias": 3.1717989417989414,
-      "rushedAgreement": 0.99,
-      "laneMae": 0.9017239940476183
+      "orderSpearman": 0.6,
+      "spurtStartMae": 3.6181759304470487,
+      "skillActivationError": 0.21583850931677018,
+      "trajectoryMae": 5.17510019528414,
+      "speedMae": 0.2417274603174601,
+      "speedBias": 0.07637359788359799,
+      "hpMae": 34.10889417989417,
+      "hpBias": 5.141899470899471,
+      "rushedAgreement": 0.9915555555555555,
+      "laneMae": 0.8988327380952378,
+      "blockedShareDiff": -0.0013333333333333333,
+      "rushedSpellLadderObserved": [
+        1.0,
+        1.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.0,
+        0.25,
+        0.125,
+        0.0
+      ],
+      "rushedSpellDurationDiff": 2.5
     },
     "pinned": {
       "finishTimeMae": 0.2760331895616319,
@@ -1052,24 +1962,52 @@
       "hpMae": 20.258323732718882,
       "hpBias": -11.26490975422427,
       "rushedAgreement": 0.9980958781362007,
-      "laneMae": 0.8750675619239654
+      "laneMae": 0.8750675619239654,
+      "blockedShareDiff": 0.0035842293906810036,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellDurationDiff": null
     }
   },
   "Silence Suzuka-74.5840s-20260830.json": {
     "free": {
-      "finishTimeMae": 0.25192154778374565,
-      "finishTimeBias": -0.0337617662217882,
+      "finishTimeMae": 0.2556251949734158,
+      "finishTimeBias": -0.03561358981662326,
       "winnerHitRate": 0.0,
       "orderSpearman": 0.5,
-      "spurtStartMae": 0.5398084852430556,
-      "skillActivationError": 0.24466463414634146,
-      "trajectoryMae": 4.984994000331192,
-      "speedMae": 0.21228354978355038,
-      "speedBias": -0.0070739538239540534,
-      "hpMae": 34.49837662337663,
-      "hpBias": 8.628030303030304,
-      "rushedAgreement": 0.9976010101010101,
-      "laneMae": 1.0092193181818154
+      "spurtStartMae": 0.5483194986979166,
+      "skillActivationError": 0.2423780487804878,
+      "trajectoryMae": 4.990845532529396,
+      "speedMae": 0.21343037518037547,
+      "speedBias": -0.007556637806638112,
+      "hpMae": 34.84069264069264,
+      "hpBias": 9.281565656565656,
+      "rushedAgreement": 0.9983585858585858,
+      "laneMae": 0.9886666599025963,
+      "blockedShareDiff": -0.0015151515151515152,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.375,
+        0.125,
+        0.0,
+        0.0
+      ],
+      "rushedSpellDurationDiff": null
     },
     "pinned": {
       "finishTimeMae": 0.20155811309814453,
@@ -1084,7 +2022,21 @@
       "hpMae": 19.266782407407412,
       "hpBias": -11.426008597883596,
       "rushedAgreement": 1.0,
-      "laneMae": 0.7854539620535738
+      "laneMae": 0.7854539620535738,
+      "blockedShareDiff": -0.000744047619047619,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellDurationDiff": null
     }
   },
   "Special Week-74.1695s-20260823.json": {
@@ -1101,7 +2053,21 @@
       "hpMae": 30.61180640347307,
       "hpBias": 0.8359957943291276,
       "rushedAgreement": 0.9921652421652422,
-      "laneMae": 0.8171177884615385
+      "laneMae": 0.8171177884615385,
+      "blockedShareDiff": 0.007834757834757835,
+      "rushedSpellLadderObserved": [
+        0.0,
+        1.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.625,
+        0.0,
+        0.0,
+        0.125
+      ],
+      "rushedSpellDurationDiff": -1.5
     },
     "pinned": {
       "finishTimeMae": 0.17238224877251518,
@@ -1116,24 +2082,52 @@
       "hpMae": 14.07454890788224,
       "hpBias": -3.7167616334283,
       "rushedAgreement": 0.9981006647673314,
-      "laneMae": 0.804200320512821
+      "laneMae": 0.804200320512821,
+      "blockedShareDiff": 0.013888888888888888,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellDurationDiff": null
     }
   },
   "Special Week-74.2200s-20260823.json": {
     "free": {
-      "finishTimeMae": 0.31665049658881295,
-      "finishTimeBias": 0.09981950124104817,
+      "finishTimeMae": 0.3192824257744683,
+      "finishTimeBias": 0.11833816104465061,
       "winnerHitRate": 0.375,
-      "orderSpearman": 0.39166666666666666,
-      "spurtStartMae": 0.4534878200954861,
-      "skillActivationError": 0.2851796407185629,
-      "trajectoryMae": 4.805482165133635,
-      "speedMae": 0.28472816320014593,
-      "speedBias": 0.01381685595694227,
-      "hpMae": 46.68138911694947,
-      "hpBias": 27.81383757525998,
-      "rushedAgreement": 0.9968869731800766,
-      "laneMae": 0.8450285470545985
+      "orderSpearman": 0.40625000000000006,
+      "spurtStartMae": 0.4486236572265625,
+      "skillActivationError": 0.2844311377245509,
+      "trajectoryMae": 4.799702867441549,
+      "speedMae": 0.2797334428024084,
+      "speedBias": 0.003252941981390434,
+      "hpMae": 46.639814814814805,
+      "hpBias": 29.554784710819195,
+      "rushedAgreement": 0.9979645593869731,
+      "laneMae": 0.8744782032532854,
+      "blockedShareDiff": -0.005747126436781609,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.25,
+        0.125,
+        0.125,
+        0.0
+      ],
+      "rushedSpellDurationDiff": null
     },
     "pinned": {
       "finishTimeMae": 0.1960748036702474,
@@ -1148,7 +2142,21 @@
       "hpMae": 14.798056923918994,
       "hpBias": -0.03303229337712108,
       "rushedAgreement": 1.0,
-      "laneMae": 1.0309694889162564
+      "laneMae": 1.0309694889162564,
+      "blockedShareDiff": -0.0056273946360153254,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellDurationDiff": null
     }
   },
   "Special Week-74.2330s-20260823.json": {
@@ -1165,7 +2173,21 @@
       "hpMae": 53.56306306306306,
       "hpBias": 38.14464464464464,
       "rushedAgreement": 0.9863613613613613,
-      "laneMae": 1.2411064189189116
+      "laneMae": 1.2411064189189116,
+      "blockedShareDiff": 0.002627627627627628,
+      "rushedSpellLadderObserved": [
+        0.0,
+        2.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.625,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellDurationDiff": -3.0
     },
     "pinned": {
       "finishTimeMae": 0.2854532665676541,
@@ -1180,24 +2202,52 @@
       "hpMae": 31.107982982982982,
       "hpBias": 9.86423923923924,
       "rushedAgreement": 0.9972472472472472,
-      "laneMae": 1.2512958896396413
+      "laneMae": 1.2512958896396413,
+      "blockedShareDiff": 0.01514014014014014,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellDurationDiff": null
     }
   },
   "Special Week-74.3402s-20260831.json": {
     "free": {
-      "finishTimeMae": 0.22261333465576172,
-      "finishTimeBias": 0.029672940572102863,
+      "finishTimeMae": 0.22076151106092665,
+      "finishTimeBias": -0.02217917972140842,
       "winnerHitRate": 0.25,
-      "orderSpearman": 0.7270833333333333,
-      "spurtStartMae": 11.618726942274305,
-      "skillActivationError": 0.23977987421383648,
-      "trajectoryMae": 4.4718508116077516,
-      "speedMae": 0.181345280764635,
-      "speedBias": 0.024376344086021386,
-      "hpMae": 39.16229091995223,
-      "hpBias": 16.212753882915166,
-      "rushedAgreement": 0.9923835125448028,
-      "laneMae": 1.0691103998655933
+      "orderSpearman": 0.7479166666666667,
+      "spurtStartMae": 6.103203667534722,
+      "skillActivationError": 0.2389937106918239,
+      "trajectoryMae": 4.409795114539233,
+      "speedMae": 0.18568137694145762,
+      "speedBias": 0.024035618279569865,
+      "hpMae": 39.76362753882916,
+      "hpBias": 15.693735065710868,
+      "rushedAgreement": 0.9939516129032258,
+      "laneMae": 1.0560850554435504,
+      "blockedShareDiff": -0.0008960573476702509,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.75,
+        0.25,
+        0.125,
+        0.125
+      ],
+      "rushedSpellDurationDiff": null
     },
     "pinned": {
       "finishTimeMae": 0.11979590521918403,
@@ -1212,24 +2262,52 @@
       "hpMae": 21.88836085509473,
       "hpBias": -11.732788231780166,
       "rushedAgreement": 1.0,
-      "laneMae": 0.8565148569508463
+      "laneMae": 0.8565148569508463,
+      "blockedShareDiff": 0.0,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellDurationDiff": null
     }
   },
   "Special Week-74.3953s-20260830.json": {
     "free": {
-      "finishTimeMae": 0.5059108734130859,
-      "finishTimeBias": 0.49683401319715714,
-      "winnerHitRate": 0.25,
-      "orderSpearman": 0.7458333333333333,
-      "spurtStartMae": 0.5698801676432291,
-      "skillActivationError": 0.30169753086419754,
-      "trajectoryMae": 9.836211920986182,
-      "speedMae": 0.2332838070628764,
-      "speedBias": -0.096940137812231,
-      "hpMae": 52.96619293712317,
-      "hpBias": 38.17011197243755,
-      "rushedAgreement": 0.9966623600344531,
-      "laneMae": 1.4306054990310102
+      "finishTimeMae": 0.5359202490912544,
+      "finishTimeBias": 0.5357229444715712,
+      "winnerHitRate": 0.125,
+      "orderSpearman": 0.7395833333333335,
+      "spurtStartMae": 0.5922224256727431,
+      "skillActivationError": 0.2993827160493827,
+      "trajectoryMae": 10.144870189233753,
+      "speedMae": 0.237476313522825,
+      "speedBias": -0.10956287683031843,
+      "hpMae": 56.2301894918174,
+      "hpBias": 43.04349698535745,
+      "rushedAgreement": 0.9978466838931955,
+      "laneMae": 1.367790092054264,
+      "blockedShareDiff": 0.015503875968992248,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.375,
+        0.25,
+        0.0,
+        0.0
+      ],
+      "rushedSpellDurationDiff": null
     },
     "pinned": {
       "finishTimeMae": 0.20789591471354166,
@@ -1244,24 +2322,52 @@
       "hpMae": 17.778617571059435,
       "hpBias": 0.15669681309216188,
       "rushedAgreement": 1.0,
-      "laneMae": 1.150559762596899
+      "laneMae": 1.150559762596899,
+      "blockedShareDiff": -0.0009689922480620155,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellDurationDiff": null
     }
   },
   "Special Week-74.4111s-20260831.json": {
     "free": {
-      "finishTimeMae": 0.3540323045518663,
-      "finishTimeBias": 0.12238989935980903,
+      "finishTimeMae": 0.34739526112874347,
+      "finishTimeBias": 0.11776023440890843,
       "winnerHitRate": 0.5,
-      "orderSpearman": 0.46875,
-      "spurtStartMae": 0.6386515299479166,
-      "skillActivationError": 0.2169811320754717,
-      "trajectoryMae": 6.165027995691248,
-      "speedMae": 0.22112962962962943,
-      "speedBias": 0.03238962962962959,
-      "hpMae": 48.46103703703704,
-      "hpBias": 0.5724444444444449,
-      "rushedAgreement": 0.9891111111111112,
-      "laneMae": 1.0818955833333341
+      "orderSpearman": 0.525,
+      "spurtStartMae": 0.3105807834201389,
+      "skillActivationError": 0.21776729559748428,
+      "trajectoryMae": 6.168716268371784,
+      "speedMae": 0.22641306878306847,
+      "speedBias": 0.040420687830687974,
+      "hpMae": 47.13388888888888,
+      "hpBias": 3.52347619047619,
+      "rushedAgreement": 0.9914444444444445,
+      "laneMae": 1.1636046309523855,
+      "blockedShareDiff": 0.0071111111111111115,
+      "rushedSpellLadderObserved": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.75,
+        0.25,
+        0.375,
+        0.0
+      ],
+      "rushedSpellDurationDiff": 2.1818181818181817
     },
     "pinned": {
       "finishTimeMae": 0.1918397479587131,
@@ -1276,24 +2382,52 @@
       "hpMae": 23.222706536682907,
       "hpBias": -10.940085614298212,
       "rushedAgreement": 0.9992344706911636,
-      "laneMae": 1.0178208134139466
+      "laneMae": 1.0178208134139466,
+      "blockedShareDiff": -0.00032808398950131233,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellDurationDiff": null
     }
   },
   "Special Week-74.4734s-20260823.json": {
     "free": {
-      "finishTimeMae": 0.2548929850260417,
-      "finishTimeBias": 0.07011498345269097,
-      "winnerHitRate": 0.0,
-      "orderSpearman": 0.09999999999999998,
-      "spurtStartMae": 0.5437486436631944,
-      "skillActivationError": 0.29538690476190477,
-      "trajectoryMae": 4.0162261446546985,
-      "speedMae": 0.2471590722495894,
-      "speedBias": -0.043730318372560036,
-      "hpMae": 24.81616949461777,
-      "hpBias": 3.253952289728152,
-      "rushedAgreement": 0.9882662835249042,
-      "laneMae": 1.1371386596880102
+      "finishTimeMae": 0.24408849080403647,
+      "finishTimeBias": 0.08400366041395399,
+      "winnerHitRate": 0.125,
+      "orderSpearman": 0.14375,
+      "spurtStartMae": 0.5779368082682291,
+      "skillActivationError": 0.296875,
+      "trajectoryMae": 3.8048422696574598,
+      "speedMae": 0.2453186120233532,
+      "speedBias": -0.053447717113665597,
+      "hpMae": 23.81028325123153,
+      "hpBias": 6.514853585112204,
+      "rushedAgreement": 0.9917385057471264,
+      "laneMae": 1.1495598919848098,
+      "blockedShareDiff": 0.008381226053639846,
+      "rushedSpellLadderObserved": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.25,
+        0.5,
+        0.25,
+        0.0
+      ],
+      "rushedSpellDurationDiff": 3.0
     },
     "pinned": {
       "finishTimeMae": 0.1429997550116645,
@@ -1308,7 +2442,21 @@
       "hpMae": 20.10650998905309,
       "hpBias": -8.045241516146689,
       "rushedAgreement": 0.9980842911877394,
-      "laneMae": 0.940172817887929
+      "laneMae": 0.940172817887929,
+      "blockedShareDiff": 0.008518062397372742,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellDurationDiff": null
     }
   },
   "Special Week-74.5035s-20260831.json": {
@@ -1322,10 +2470,24 @@
       "trajectoryMae": 4.978594882523881,
       "speedMae": 0.24100802049214698,
       "speedBias": 0.057830141933316564,
-      "hpMae": 41.8233203157806,
-      "hpBias": 14.372274712354075,
-      "rushedAgreement": 0.9932760141093474,
-      "laneMae": 1.2286793320105862
+      "hpMae": 42.027452338960245,
+      "hpBias": 14.670542538002854,
+      "rushedAgreement": 0.9936067019400353,
+      "laneMae": 1.2286793320105862,
+      "blockedShareDiff": 0.006393298059964726,
+      "rushedSpellLadderObserved": [
+        0.0,
+        1.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.625,
+        0.0,
+        0.125,
+        0.125
+      ],
+      "rushedSpellDurationDiff": -0.8571428571428568
     },
     "pinned": {
       "finishTimeMae": 0.20991558498806423,
@@ -1340,7 +2502,21 @@
       "hpMae": 21.437222222222225,
       "hpBias": -15.425444444444445,
       "rushedAgreement": 0.9984444444444445,
-      "laneMae": 1.295658916666667
+      "laneMae": 1.295658916666667,
+      "blockedShareDiff": -0.001,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellDurationDiff": null
     }
   },
   "Special Week-74.5834s-20260831.json": {
@@ -1357,7 +2533,21 @@
       "hpMae": 60.3659420289855,
       "hpBias": 36.46038647342994,
       "rushedAgreement": 0.9794685990338164,
-      "laneMae": 0.817912771739133
+      "laneMae": 0.817912771739133,
+      "blockedShareDiff": 0.01533816425120773,
+      "rushedSpellLadderObserved": [
+        2.0,
+        1.0,
+        1.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.625,
+        0.0,
+        0.0,
+        0.125
+      ],
+      "rushedSpellDurationDiff": -0.75
     },
     "pinned": {
       "finishTimeMae": 0.20546690622965494,
@@ -1372,24 +2562,52 @@
       "hpMae": 16.445358868184954,
       "hpBias": 6.058091787439612,
       "rushedAgreement": 0.9939613526570048,
-      "laneMae": 0.7738565411490665
+      "laneMae": 0.7738565411490665,
+      "blockedShareDiff": 0.014009661835748793,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellDurationDiff": null
     }
   },
   "Special Week-74.5856s-20260830.json": {
     "free": {
-      "finishTimeMae": 0.25275421142578125,
-      "finishTimeBias": 0.18478626675075954,
+      "finishTimeMae": 0.24719884660508898,
+      "finishTimeBias": 0.17923090193006727,
       "winnerHitRate": 0.625,
-      "orderSpearman": 0.8520833333333334,
-      "spurtStartMae": 6.4007415771484375,
+      "orderSpearman": 0.8979166666666667,
+      "spurtStartMae": 4.34275139702691,
       "skillActivationError": 0.24118589743589744,
-      "trajectoryMae": 5.059639396620419,
-      "speedMae": 0.18248253736192377,
-      "speedBias": -0.02966333658219577,
-      "hpMae": 34.57240903183885,
-      "hpBias": -1.4721816114359976,
-      "rushedAgreement": 0.9831871345029239,
-      "laneMae": 0.8654304641812861
+      "trajectoryMae": 5.0253926433219025,
+      "speedMae": 0.18001908706952569,
+      "speedBias": -0.02667032163742646,
+      "hpMae": 33.52262020792722,
+      "hpBias": 0.22112573099415195,
+      "rushedAgreement": 0.9853801169590644,
+      "laneMae": 0.8631169133771937,
+      "blockedShareDiff": 0.008650097465886939,
+      "rushedSpellLadderObserved": [
+        1.0,
+        1.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.625,
+        0.25,
+        0.25,
+        0.25
+      ],
+      "rushedSpellDurationDiff": 1.7727272727272725
     },
     "pinned": {
       "finishTimeMae": 0.22068585289849174,
@@ -1404,24 +2622,52 @@
       "hpMae": 18.455391952102474,
       "hpBias": 0.5631265664160399,
       "rushedAgreement": 0.9973196881091618,
-      "laneMae": 0.9980039747806998
+      "laneMae": 0.9980039747806998,
+      "blockedShareDiff": 0.010964912280701754,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellDurationDiff": null
     }
   },
   "Special Week-74.6034s-20260831.json": {
     "free": {
-      "finishTimeMae": 0.2549896240234375,
-      "finishTimeBias": -0.1673543718126085,
+      "finishTimeMae": 0.255915535820855,
+      "finishTimeBias": -0.16828028361002603,
       "winnerHitRate": 0.125,
       "orderSpearman": 0.7666666666666667,
       "spurtStartMae": 2.55828857421875,
       "skillActivationError": 0.27205882352941174,
-      "trajectoryMae": 4.922461674462575,
-      "speedMae": 0.26071812520485105,
-      "speedBias": 0.0850381842019007,
-      "hpMae": 42.021279908226795,
-      "hpBias": -8.794469026548676,
-      "rushedAgreement": 0.9854965585054081,
-      "laneMae": 1.0373411043510283
+      "trajectoryMae": 4.9226095061721455,
+      "speedMae": 0.2632427073090789,
+      "speedBias": 0.09316748607014069,
+      "hpMae": 42.116289741068485,
+      "hpBias": -8.234119960668636,
+      "rushedAgreement": 0.9866027531956736,
+      "laneMae": 1.0373411043510283,
+      "blockedShareDiff": 0.003933136676499509,
+      "rushedSpellLadderObserved": [
+        1.0,
+        1.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.75,
+        0.125,
+        0.125,
+        0.25
+      ],
+      "rushedSpellDurationDiff": 1.2000000000000002
     },
     "pinned": {
       "finishTimeMae": 0.18352317810058594,
@@ -1436,24 +2682,52 @@
       "hpMae": 17.990183792815372,
       "hpBias": -11.676065162907268,
       "rushedAgreement": 0.9969541910331384,
-      "laneMae": 0.9545075579573975
+      "laneMae": 0.9545075579573975,
+      "blockedShareDiff": 0.012183235867446393,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellDurationDiff": null
     }
   },
   "Special Week-74.6260s-20260830.json": {
     "free": {
-      "finishTimeMae": 0.1994102266099718,
-      "finishTimeBias": 0.004865964253743489,
-      "winnerHitRate": 0.375,
-      "orderSpearman": 0.8624999999999999,
-      "spurtStartMae": 0.4246300591362847,
-      "skillActivationError": 0.2682926829268293,
-      "trajectoryMae": 3.963887745118642,
-      "speedMae": 0.2540129558767945,
-      "speedBias": 0.11795888841647743,
-      "hpMae": 30.187122071050638,
-      "hpBias": 2.3708664021164028,
-      "rushedAgreement": 0.9952876984126984,
-      "laneMae": 0.957952447385207
+      "finishTimeMae": 0.2095953623453776,
+      "finishTimeBias": 0.011347452799479166,
+      "winnerHitRate": 0.25,
+      "orderSpearman": 0.8395833333333335,
+      "spurtStartMae": 0.3992818196614583,
+      "skillActivationError": 0.2621951219512195,
+      "trajectoryMae": 4.006246853823649,
+      "speedMae": 0.2530510085978831,
+      "speedBias": 0.11631985780423265,
+      "hpMae": 28.48882747543462,
+      "hpBias": 5.393613000755859,
+      "rushedAgreement": 0.9978918650793651,
+      "laneMae": 0.9792477346407327,
+      "blockedShareDiff": 0.0021081349206349205,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.0,
+        0.375,
+        0.0,
+        0.0
+      ],
+      "rushedSpellDurationDiff": null
     },
     "pinned": {
       "finishTimeMae": 0.14694531758626303,
@@ -1468,24 +2742,52 @@
       "hpMae": 16.274730725623584,
       "hpBias": -7.237209467120181,
       "rushedAgreement": 1.0,
-      "laneMae": 0.6982486447704074
+      "laneMae": 0.6982486447704074,
+      "blockedShareDiff": 0.006076388888888889,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellDurationDiff": null
     }
   },
   "Special Week-74.6306s-20260831.json": {
     "free": {
-      "finishTimeMae": 0.3513348897298177,
-      "finishTimeBias": -0.19891526963975695,
+      "finishTimeMae": 0.3476313485039605,
+      "finishTimeBias": -0.1933596928914388,
       "winnerHitRate": 0.25,
-      "orderSpearman": 0.4458333333333333,
-      "spurtStartMae": 3.528020222981771,
-      "skillActivationError": 0.26838235294117646,
-      "trajectoryMae": 5.219912199368491,
-      "speedMae": 0.26051098717765364,
-      "speedBias": 0.051848634348634265,
-      "hpMae": 34.246258162924846,
-      "hpBias": 4.990907574240907,
-      "rushedAgreement": 0.9928678678678678,
-      "laneMae": 1.0270574056199078
+      "orderSpearman": 0.4333333333333333,
+      "spurtStartMae": 3.5363023546006946,
+      "skillActivationError": 0.2691176470588235,
+      "trajectoryMae": 5.178012120287831,
+      "speedMae": 0.2638147075647071,
+      "speedBias": 0.05018214643214642,
+      "hpMae": 34.550479050479055,
+      "hpBias": 5.798226798226797,
+      "rushedAgreement": 0.9936186186186187,
+      "laneMae": 1.0037545849420866,
+      "blockedShareDiff": -0.01438938938938939,
+      "rushedSpellLadderObserved": [
+        0.0,
+        1.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.25,
+        0.125,
+        0.0,
+        0.0
+      ],
+      "rushedSpellDurationDiff": -2.0
     },
     "pinned": {
       "finishTimeMae": 0.13985792795817056,
@@ -1500,24 +2802,52 @@
       "hpMae": 17.23465608465608,
       "hpBias": -11.994252044252045,
       "rushedAgreement": 0.9982323232323232,
-      "laneMae": 0.9009995670995646
+      "laneMae": 0.9009995670995646,
+      "blockedShareDiff": -0.006439393939393939,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellDurationDiff": null
     }
   },
   "Special Week-74.6895s-20260831.json": {
     "free": {
-      "finishTimeMae": 0.25452295939127606,
-      "finishTimeBias": -0.01416778564453125,
-      "winnerHitRate": 0.25,
-      "orderSpearman": 0.5916666666666668,
-      "spurtStartMae": 0.18376329210069445,
-      "skillActivationError": 0.24479166666666666,
-      "trajectoryMae": 5.008710421774478,
-      "speedMae": 0.22881923959357667,
-      "speedBias": 0.05965666994428063,
-      "hpMae": 37.82452474598494,
-      "hpBias": -8.768477548344805,
-      "rushedAgreement": 0.992748279252704,
-      "laneMae": 0.6221869008112095
+      "finishTimeMae": 0.2610044479370117,
+      "finishTimeBias": -0.0002790027194552951,
+      "winnerHitRate": 0.125,
+      "orderSpearman": 0.5541666666666667,
+      "spurtStartMae": 0.1808844672309028,
+      "skillActivationError": 0.24553571428571427,
+      "trajectoryMae": 5.015935161891945,
+      "speedMae": 0.23199401835463815,
+      "speedBias": 0.05765691576532273,
+      "hpMae": 36.96730580137659,
+      "hpBias": -5.96386430678466,
+      "rushedAgreement": 0.9953294001966568,
+      "laneMae": 0.6206290560471974,
+      "blockedShareDiff": 0.014011799410029498,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.125,
+        0.375,
+        0.125,
+        0.125
+      ],
+      "rushedSpellDurationDiff": null
     },
     "pinned": {
       "finishTimeMae": 0.17087237040201822,
@@ -1532,24 +2862,52 @@
       "hpMae": 17.713850598719024,
       "hpBias": -7.73133644295925,
       "rushedAgreement": 1.0,
-      "laneMae": 0.7412974754594833
+      "laneMae": 0.7412974754594833,
+      "blockedShareDiff": 0.01364522417153996,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellDurationDiff": null
     }
   },
   "Special Week-74.8247s-20260831.json": {
     "free": {
-      "finishTimeMae": 0.3434790505303277,
-      "finishTimeBias": -0.14053461286756727,
+      "finishTimeMae": 0.36384942796495223,
+      "finishTimeBias": -0.11090490553114149,
       "winnerHitRate": 0.75,
-      "orderSpearman": 0.5541666666666667,
-      "spurtStartMae": 0.151611328125,
-      "skillActivationError": 0.2644230769230769,
-      "trajectoryMae": 6.456597522355153,
-      "speedMae": 0.2637417966211833,
-      "speedBias": 0.047840492434790924,
-      "hpMae": 49.633922769887675,
-      "hpBias": 26.731975772765267,
-      "rushedAgreement": 0.9739278752436648,
-      "laneMae": 1.0449906119465355
+      "orderSpearman": 0.5729166666666666,
+      "spurtStartMae": 0.18862406412760416,
+      "skillActivationError": 0.2636217948717949,
+      "trajectoryMae": 6.342701262816775,
+      "speedMae": 0.25730469692750463,
+      "speedBias": 0.03940777870602459,
+      "hpMae": 51.478384618954784,
+      "hpBias": 29.28598927875245,
+      "rushedAgreement": 0.9749025341130604,
+      "laneMae": 1.0049322825292388,
+      "blockedShareDiff": 0.0006091617933723197,
+      "rushedSpellLadderObserved": [
+        0.0,
+        3.0,
+        1.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.25,
+        0.125,
+        0.125,
+        0.0
+      ],
+      "rushedSpellDurationDiff": -1.5
     },
     "pinned": {
       "finishTimeMae": 0.3164958953857422,
@@ -1564,7 +2922,21 @@
       "hpMae": 36.869221665274296,
       "hpBias": -29.20770676691729,
       "rushedAgreement": 0.9980506822612085,
-      "laneMae": 0.9219729205827087
+      "laneMae": 0.9219729205827087,
+      "blockedShareDiff": -0.003776803118908382,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellDurationDiff": null
     }
   },
   "Taiki Shuttle-74.4905s-20260823.json": {
@@ -1575,13 +2947,27 @@
       "orderSpearman": 0.32708333333333334,
       "spurtStartMae": 0.3417595757378472,
       "skillActivationError": 0.3236607142857143,
-      "trajectoryMae": 3.57183070372721,
-      "speedMae": 0.20205962916139947,
-      "speedBias": -0.03775038629020914,
-      "hpMae": 29.229526618907148,
-      "hpBias": 2.204523107177975,
-      "rushedAgreement": 0.9939773844641101,
-      "laneMae": 1.3671605562578992
+      "trajectoryMae": 3.5718328792674403,
+      "speedMae": 0.20179765416491127,
+      "speedBias": -0.03727489815985372,
+      "hpMae": 28.831261413119815,
+      "hpBias": 3.3922601488973174,
+      "rushedAgreement": 0.9953294001966568,
+      "laneMae": 1.3671605562578992,
+      "blockedShareDiff": -0.0007374631268436578,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.625,
+        0.125,
+        0.25,
+        0.0
+      ],
+      "rushedSpellDurationDiff": null
     },
     "pinned": {
       "finishTimeMae": 0.07234350840250652,
@@ -1596,24 +2982,52 @@
       "hpMae": 23.20120452310718,
       "hpBias": -14.751352015732547,
       "rushedAgreement": 1.0,
-      "laneMae": 0.9368448561946892
+      "laneMae": 0.9368448561946892,
+      "blockedShareDiff": 0.017453294001966567,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellDurationDiff": null
     }
   },
   "Taiki Shuttle-74.6058s-20260831.json": {
     "free": {
-      "finishTimeMae": 0.2699737548828125,
-      "finishTimeBias": 0.08524915907118055,
+      "finishTimeMae": 0.25976573096381295,
+      "finishTimeBias": 0.053767416212293834,
       "winnerHitRate": 0.25,
-      "orderSpearman": 0.51875,
-      "spurtStartMae": 7.370920817057292,
-      "skillActivationError": 0.2325,
-      "trajectoryMae": 5.470834225258992,
-      "speedMae": 0.20926620077726216,
-      "speedBias": -0.01650572411855586,
-      "hpMae": 42.11644191599943,
-      "hpBias": 20.083637683195207,
-      "rushedAgreement": 0.9847590953785644,
-      "laneMae": 0.7573999302043805
+      "orderSpearman": 0.60625,
+      "spurtStartMae": 0.7093556722005209,
+      "skillActivationError": 0.22333333333333333,
+      "trajectoryMae": 5.119908910150052,
+      "speedMae": 0.20020638463718857,
+      "speedBias": 0.009970769557822988,
+      "hpMae": 40.22799744897964,
+      "hpBias": 22.39526643990931,
+      "rushedAgreement": 0.9875992063492064,
+      "laneMae": 0.7252725605867344,
+      "blockedShareDiff": 0.00978481670445956,
+      "rushedSpellLadderObserved": [
+        2.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.625,
+        0.5,
+        0.0,
+        0.125
+      ],
+      "rushedSpellDurationDiff": 2.0999999999999996
     },
     "pinned": {
       "finishTimeMae": 0.12791389889187282,
@@ -1628,24 +3042,52 @@
       "hpMae": 18.933207070707066,
       "hpBias": -9.061489898989901,
       "rushedAgreement": 0.9959595959595959,
-      "laneMae": 0.7982550284090866
+      "laneMae": 0.7982550284090866,
+      "blockedShareDiff": -0.0031565656565656565,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellDurationDiff": null
     }
   },
   "Vodka-74.5581s-20260831.json": {
     "free": {
       "finishTimeMae": 0.2775852415296767,
-      "finishTimeBias": 0.021706581115722656,
+      "finishTimeBias": 0.023558404710557725,
       "winnerHitRate": 0.0,
       "orderSpearman": 0.3770833333333333,
-      "spurtStartMae": 3.3386060926649304,
-      "skillActivationError": 0.24825174825174826,
-      "trajectoryMae": 4.497650165954501,
-      "speedMae": 0.2354186868686871,
-      "speedBias": 0.041048484848485,
-      "hpMae": 44.97065656565657,
-      "hpBias": -1.3212626262626261,
-      "rushedAgreement": 0.9926767676767677,
-      "laneMae": 0.8331079829545449
+      "spurtStartMae": 3.3413153754340277,
+      "skillActivationError": 0.24737762237762237,
+      "trajectoryMae": 4.499716641131072,
+      "speedMae": 0.23694671717171797,
+      "speedBias": 0.043796212121212236,
+      "hpMae": 44.88747474747475,
+      "hpBias": -0.8269191919191919,
+      "rushedAgreement": 0.9933080808080809,
+      "laneMae": 0.8238586363636347,
+      "blockedShareDiff": 0.018813131313131313,
+      "rushedSpellLadderObserved": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.5,
+        0.125,
+        0.0,
+        0.125
+      ],
+      "rushedSpellDurationDiff": 2.0
     },
     "pinned": {
       "finishTimeMae": 0.19047249688042533,
@@ -1660,24 +3102,52 @@
       "hpMae": 14.763860288860299,
       "hpBias": -2.578038753038752,
       "rushedAgreement": 0.997997997997998,
-      "laneMae": 0.8417589728120992
+      "laneMae": 0.8417589728120992,
+      "blockedShareDiff": 0.018643643643643643,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellDurationDiff": null
     }
   },
   "Yukino Bijin-74.7362s-20260823.json": {
     "free": {
-      "finishTimeMae": 0.3135364320543077,
-      "finishTimeBias": 0.17591465844048393,
+      "finishTimeMae": 0.31724007924397785,
+      "finishTimeBias": 0.16295189327663845,
       "winnerHitRate": 0.5,
-      "orderSpearman": 0.3541666666666667,
-      "spurtStartMae": 0.4239942762586806,
-      "skillActivationError": 0.2528409090909091,
-      "trajectoryMae": 4.201830468226061,
-      "speedMae": 0.26266458805744464,
-      "speedBias": -0.038826341647770234,
-      "hpMae": 50.63981481481482,
-      "hpBias": 32.18025321239607,
-      "rushedAgreement": 0.9768518518518519,
-      "laneMae": 0.925237903911566
+      "orderSpearman": 0.3145833333333333,
+      "spurtStartMae": 0.4305487738715278,
+      "skillActivationError": 0.25355113636363635,
+      "trajectoryMae": 4.220854483622423,
+      "speedMae": 0.2626324640967493,
+      "speedBias": -0.03252210884353735,
+      "hpMae": 49.358805744520026,
+      "hpBias": 33.18004535147393,
+      "rushedAgreement": 0.978042328042328,
+      "laneMae": 0.9660120535714242,
+      "blockedShareDiff": 0.00013227513227513228,
+      "rushedSpellLadderObserved": [
+        1.0,
+        1.0,
+        1.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.625,
+        0.125,
+        0.125,
+        0.125
+      ],
+      "rushedSpellDurationDiff": -0.75
     },
     "pinned": {
       "finishTimeMae": 0.15183438195122612,
@@ -1692,7 +3162,21 @@
       "hpMae": 21.25074955908289,
       "hpBias": 6.099955908289242,
       "rushedAgreement": 0.9940476190476191,
-      "laneMae": 0.9787959821428586
+      "laneMae": 0.9787959821428586,
+      "blockedShareDiff": -0.004894179894179894,
+      "rushedSpellLadderObserved": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellLadderSim": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rushedSpellDurationDiff": null
     }
   }
 }
