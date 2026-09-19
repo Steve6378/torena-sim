@@ -34,7 +34,7 @@ pub struct PositionKeepContext {
     pub field_size: usize,
     /// The pacer's current position, if a pacer is selected.
     pub pacer_position: Option<f64>,
-    /// The pacer's post-promotion position-keep strategy, if a pacer is selected.
+    /// The pacer's own position-keep strategy, if a pacer is selected.
     pub pacer_strategy: Option<Strategy>,
     /// Whether this runner *is* the pacer.
     pub pacer_is_self: bool,
@@ -195,7 +195,34 @@ fn enter_from_none_front_runner(runner: &mut Runner, ctx: &PositionKeepContext) 
 }
 
 /// Run the non-front-runner branch of the `None` state.
-fn enter_from_none_pacer(runner: &mut Runner, behind: f64) {
+///
+/// The pacemaker herself takes no mode here. `behind` is measured from the
+/// pacer, so for the pacer it is her distance from herself -- 0, which is below
+/// every minimum threshold, so without this guard the leader of the most
+/// forward style in a front-less field would pace down at 0.915x on her own
+/// first check while the rest of the field keeps position against her.
+///
+/// The recordings say she does not. Over 21 front-less races (7 tournament, 14
+/// Hanshin) the innermost-gate uma of the most forward style -- the runner this
+/// engine elects on frame 0 -- is in normal mode at the 3.20 s frame in 21 of
+/// 21, including the 14 where she is not even first at 2.13 s; her style-mates
+/// sit at 0.910-0.925 of base target speed over the same frames and leave it
+/// after one section. Across every frame from 3 s the leader of that style is
+/// inside the pace-down band in 7 of 431 frames, and in 0 of the 292 frames she
+/// leads. So the exemption belongs to the role, not to the runner: she keeps it
+/// while she leads her style and loses it at the first check after the role
+/// moves, which is what the recordings' own handover looks like (the holder
+/// steps down to 0.915 between the 4.26 s and 5.33 s frames in 8 of the 9 races
+/// where she loses a frame at the start, and never in the 12 where she does
+/// not).
+///
+/// Taking no mode is the same outcome as a failed check, so the caller arms the
+/// ordinary retry timer and she is asked again two seconds later.
+fn enter_from_none_pacer(runner: &mut Runner, ctx: &PositionKeepContext, behind: f64) {
+    if ctx.pacer_is_self {
+        return;
+    }
+
     if behind > runner.pos_keep_max_threshold {
         if pace_up_wit_check(runner) {
             begin_state(runner, PositionKeepState::PaceUp);
@@ -260,7 +287,7 @@ fn handle_none(runner: &mut Runner, ctx: &PositionKeepContext, behind: f64) {
     if strategy_matches(runner.position_keep_strategy, Strategy::FrontRunner) {
         enter_from_none_front_runner(runner, ctx);
     } else {
-        enter_from_none_pacer(runner, behind);
+        enter_from_none_pacer(runner, ctx, behind);
     }
 
     if runner.position_keep_state == PositionKeepState::None {
@@ -455,6 +482,80 @@ mod tests {
         let c = ctx(Some(50.0 + r.pos_keep_min_threshold - 0.5), false, None);
         apply_virtual_position_keep(&mut r, &c);
         assert_eq!(r.position_keep_state, PositionKeepState::PaceDown);
+    }
+
+    /// The one new rule: the pacemaker keeps no position against herself.
+    /// `behind` is 0 for her, which is below every minimum threshold, so
+    /// v0.13.0's non-front-runner branch would have paced her down at 0.915x --
+    /// the reason it rewrote her to Front Runner instead. The recordings put
+    /// the leader of the most forward style in normal mode (21 of 21 races at
+    /// the 3.20 s frame; 0 of the 292 frames she leads inside the pace-down
+    /// band), so she takes no mode and is asked again on the ordinary 2 s
+    /// retry.
+    #[test]
+    fn pacemaker_takes_no_mode_and_rearms_the_retry_timer() {
+        let mut r = runner(Strategy::PaceChaser, 50.0);
+        r.is_rushed = true; // the wit checks would pass, if one were reached
+        initialize_position_keep(&mut r, 2400.0, 3.0);
+        let mut c = ctx(Some(50.0), true, None);
+        c.pacer_strategy = Some(Strategy::PaceChaser); // her own style, not a rewrite
+
+        apply_virtual_position_keep(&mut r, &c);
+
+        assert_eq!(r.position_keep_state, PositionKeepState::None);
+        assert!(r.position_keep_activations.is_empty());
+        assert_eq!(r.pos_keep_next_timer.t, -2.0);
+    }
+
+    /// The exemption belongs to the role, not to the runner: the same runner,
+    /// the same distance, one frame after the role has moved on.
+    #[test]
+    fn a_former_pacemaker_paces_down_like_anyone_else() {
+        let mut r = runner(Strategy::PaceChaser, 50.0);
+        r.is_rushed = true;
+        initialize_position_keep(&mut r, 2400.0, 3.0);
+        let mut c = ctx(Some(50.0 + r.pos_keep_min_threshold - 0.5), false, None);
+        c.pacer_strategy = Some(Strategy::PaceChaser);
+
+        apply_virtual_position_keep(&mut r, &c);
+
+        assert_eq!(r.position_keep_state, PositionKeepState::PaceDown);
+    }
+
+    /// A front-less pacemaker is not a front runner: speed up (1.04x) and
+    /// overtake (1.05x) stay behind the Front Runner / Runaway gate, so holding
+    /// the role never buys her either.
+    #[test]
+    fn a_front_less_pacemaker_gets_neither_speed_up_nor_overtake() {
+        let mut r = runner(Strategy::PaceChaser, 200.0);
+        r.is_rushed = true;
+        initialize_position_keep(&mut r, 2400.0, 3.0);
+        let mut c = ctx(Some(200.0), true, Some(197.0)); // a 3m lead, under 4.5m
+        c.pacer_strategy = Some(Strategy::PaceChaser);
+
+        apply_virtual_position_keep(&mut r, &c);
+
+        assert_eq!(r.position_keep_state, PositionKeepState::None);
+        update_position_keep_coefficient(&mut r);
+        assert_eq!(r.pos_keep_speed_coef, 1.0);
+    }
+
+    /// With her real style published, her style-mates read the pacer as one of
+    /// their own and stay out of Pace Up Ex; v0.13.0 published Front Runner for
+    /// her, and she herself took the front-runner branch of the mode -- 2.0x of
+    /// base target speed, which no recorded front-less frame comes near (0 of
+    /// them above 1.30).
+    #[test]
+    fn a_front_less_pacemaker_does_not_take_pace_up_ex_against_herself() {
+        let mut r = runner(Strategy::PaceChaser, 200.0);
+        initialize_position_keep(&mut r, 2400.0, 3.0);
+        let mut c = ctx(Some(200.0), true, Some(190.0));
+        c.pacer_strategy = Some(Strategy::PaceChaser);
+        c.backward_strategy_runner_ahead = true; // a late surger is up the road
+
+        apply_virtual_position_keep(&mut r, &c);
+
+        assert_eq!(r.position_keep_state, PositionKeepState::None);
     }
 
     #[test]

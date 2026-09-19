@@ -371,7 +371,7 @@ impl Race {
         self.accumulated_time += dt;
 
         let snapshot = build_field_snapshot(
-            &mut self.runners,
+            &self.runners,
             &self.finished_runners,
             &mut self.order_tracker,
         );
@@ -1307,7 +1307,7 @@ mod tests {
         race.prepare_round(7);
 
         let snapshot = build_field_snapshot(
-            &mut race.runners,
+            &race.runners,
             &race.finished_runners,
             &mut race.order_tracker,
         );
@@ -1375,7 +1375,7 @@ mod tests {
         }));
 
         let snapshot = build_field_snapshot(
-            &mut race.runners,
+            &race.runners,
             &race.finished_runners,
             &mut race.order_tracker,
         );
@@ -1437,7 +1437,7 @@ mod tests {
         race.runners[2].rushed_max_duration = 12.0;
 
         let snapshot = build_field_snapshot(
-            &mut race.runners,
+            &race.runners,
             &race.finished_runners,
             &mut race.order_tracker,
         );
@@ -1486,7 +1486,7 @@ mod tests {
         race.finished_runners = vec![RunnerId(2), RunnerId(1)];
 
         let snapshot = build_field_snapshot(
-            &mut race.runners,
+            &race.runners,
             &race.finished_runners,
             &mut race.order_tracker,
         );
@@ -1528,7 +1528,7 @@ mod tests {
         race.runners[1].current_lane = 0.0;
 
         let snapshot = build_field_snapshot(
-            &mut race.runners,
+            &race.runners,
             &race.finished_runners,
             &mut race.order_tracker,
         );
@@ -1543,7 +1543,7 @@ mod tests {
         // agree it blocks.
         race.runners[1].position = 1001.0;
         let snapshot = build_field_snapshot(
-            &mut race.runners,
+            &race.runners,
             &race.finished_runners,
             &mut race.order_tracker,
         );

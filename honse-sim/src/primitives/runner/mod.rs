@@ -370,10 +370,9 @@ pub struct Runner {
     ///
     /// The override writes its pick into
     /// [`position_keep_strategy`](Self::position_keep_strategy), but that field
-    /// keeps moving afterwards -- the pacer promotion and the `ChangeStrategy`
-    /// skill both reassign it mid-spell -- so it cannot be read back as "what
-    /// the override chose". This field is the pick itself, fixed for the
-    /// duration of the spell.
+    /// can move afterwards -- the `ChangeStrategy` skill reassigns it mid-spell
+    /// -- so it cannot be read back as "what the override chose". This field is
+    /// the pick itself, fixed for the duration of the spell.
     pub rushed_keep_strategy: Option<Strategy>,
     /// Index into forced rushed regions.
     pub forced_rushed_index: usize,

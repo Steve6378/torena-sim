@@ -33,7 +33,7 @@ pub struct FieldSnapshot {
     pub pacer: Option<RunnerId>,
     /// The pacer's current position.
     pub pacer_position: Option<f64>,
-    /// The pacer's post-promotion position-keep strategy.
+    /// The pacer's own position-keep strategy.
     pub pacer_strategy: Option<Strategy>,
     /// Position of the second-furthest-forward runner.
     pub second_place_position: Option<f64>,
@@ -101,33 +101,33 @@ impl FieldOrderTracker {
     }
 }
 
-/// Build the immutable field snapshot for this frame: resolve + apply pacer
-/// promotion (mutating one runner's keep-strategy), then freeze every active
-/// runner's state and refresh the order maps in `tracker`.
+/// Build the immutable field snapshot for this frame: resolve the pacer, then
+/// freeze every active runner's state and refresh the order maps in `tracker`.
+///
+/// The field is read, never written. v0.13.0 rewrote the front-less pacemaker's
+/// `position_keep_strategy` to Front Runner here, once and for all, so that she
+/// kept position as a front runner (speed up 1.04x, overtake 1.05x, Pace Up Ex
+/// 2.0x) and answered the exact-strategy pass of [`select_pacer`] for the rest
+/// of the race. The recordings refute both halves: over 21 front-less races the
+/// leader of the most forward style runs at the plain normal target (median
+/// 0.999 / 0.996 of base target speed, max 1.004, no frame anywhere above
+/// 1.30), and the role changes hands. So the snapshot only reports her, and
+/// `pacer_strategy` is her own style -- which is what `should_pace_up_ex`
+/// reads, so her style-mates no longer see a synthetic Front Runner ahead of
+/// them either. The exemption that keeps her out of pace down is in
+/// [`enter_from_none_pacer`](crate::position_keep).
 pub fn build_field_snapshot(
-    runners: &mut [Runner],
+    runners: &[Runner],
     finished_runners: &[RunnerId],
     tracker: &mut FieldOrderTracker,
 ) -> FieldSnapshot {
-    // Resolve + apply pacer promotion (mutates one runner's keep-strategy).
-    let selection = select_pacer(runners, tracker.pacer);
+    let pacer = select_pacer(runners, tracker.pacer);
     let mut pacer_strategy = None;
-    if let Some(sel) = selection {
-        if sel.promote_to_front_runner {
-            if let Some(runner) = runners.iter_mut().find(|r| r.id == sel.runner_id) {
-                runner.position_keep_strategy = Strategy::FrontRunner;
-            }
-        }
-        tracker.pacer = Some(sel.runner_id);
-        if let Some(runner) = runners.iter().find(|r| r.id == sel.runner_id) {
-            tracker.pacer_position = Some(runner.position);
-            pacer_strategy = Some(runner.position_keep_strategy);
-        } else {
-            tracker.pacer_position = None;
-        }
-    } else {
-        tracker.pacer = None;
-        tracker.pacer_position = None;
+    tracker.pacer = pacer;
+    tracker.pacer_position = None;
+    if let Some(runner) = pacer.and_then(|id| runners.iter().find(|r| r.id == id)) {
+        tracker.pacer_position = Some(runner.position);
+        pacer_strategy = Some(runner.position_keep_strategy);
     }
 
     let entries: Vec<SnapEntry> = runners
@@ -171,7 +171,7 @@ pub fn build_field_snapshot(
         order.insert(entry.id, finished_count + i as i64 + 1);
     }
     // Forced-rank overrides.
-    for runner in runners.iter() {
+    for runner in runners {
         for region in &runner.forced_rank {
             if runner.position >= region.start && runner.position < region.end {
                 order.insert(runner.id, region.rank);
@@ -441,6 +441,47 @@ mod tests {
     fn ids(mut v: Vec<RunnerId>) -> Vec<RunnerId> {
         v.sort_by_key(|r| r.0);
         v
+    }
+
+    /// A front-less field is read, never rewritten. v0.13.0 set the elected
+    /// pacemaker's `position_keep_strategy` to Front Runner right here and left
+    /// it there, so she kept position as a front runner and answered the
+    /// exact-strategy pass of `select_pacer` for the rest of the race. Now the
+    /// snapshot publishes her real style and the role follows the leader of the
+    /// most forward style, frame by frame.
+    #[test]
+    fn a_front_less_snapshot_rewrites_nobody_and_lets_the_role_move() {
+        use crate::runner::test_support::test_runner;
+
+        let mut runners: Vec<Runner> = [
+            (0_u32, Strategy::PaceChaser),
+            (1, Strategy::PaceChaser),
+            (2, Strategy::LateSurger),
+        ]
+        .into_iter()
+        .map(|(id, strategy)| {
+            let mut r = test_runner(id, strategy);
+            r.gate = i64::from(id);
+            r
+        })
+        .collect();
+        let mut tracker = FieldOrderTracker::new();
+
+        // Opening frame: every position is 0.0, so the rail of the most forward
+        // style present takes the role (recordings: 21 of 21).
+        let snap = build_field_snapshot(&runners, &[], &mut tracker);
+        assert_eq!(snap.pacer, Some(RunnerId(0)));
+        assert_eq!(snap.pacer_strategy, Some(Strategy::PaceChaser));
+
+        // A later frame with her style-mate in front: the role moves with the
+        // lead, and every runner still owns the style she started with.
+        runners[1].position = 12.0;
+        let snap = build_field_snapshot(&runners, &[], &mut tracker);
+        assert_eq!(snap.pacer, Some(RunnerId(1)));
+        assert_eq!(snap.pacer_strategy, Some(Strategy::PaceChaser));
+        assert!(runners
+            .iter()
+            .all(|r| r.position_keep_strategy == r.strategy));
     }
 
     #[test]

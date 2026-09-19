@@ -289,9 +289,8 @@ impl Runner {
     ///
     /// The pick is also kept in
     /// [`rushed_keep_strategy`](Runner::rushed_keep_strategy) for the length of
-    /// the spell: `position_keep_strategy` is reassigned later by the pacer
-    /// promotion and by `ChangeStrategy`, so it is not a record of what the
-    /// override chose.
+    /// the spell: `position_keep_strategy` can be reassigned later by
+    /// `ChangeStrategy`, so it is not a record of what the override chose.
     fn apply_rushed_strategy_override(&mut self) {
         let roll = self.rushed_rng.random();
         let target = match self.strategy {
@@ -757,10 +756,10 @@ mod tests {
     }
 
     /// The override's pick is recorded for the spell, and stays the pick even
-    /// after `position_keep_strategy` is reassigned under it (the pacer
-    /// promotion and `ChangeStrategy` both do that mid-spell). The recorded
-    /// tournament spells never change mode inside a spell (0 of 143), so the
-    /// replay label has to read this and not the live field.
+    /// after `position_keep_strategy` is reassigned under it (`ChangeStrategy`
+    /// does that mid-spell). The recorded tournament spells never change mode
+    /// inside a spell (0 of 143), so the replay label has to read this and not
+    /// the live field.
     #[test]
     fn rushed_override_records_its_pick_for_the_whole_spell() {
         use crate::events::RunnerObservation;
@@ -773,7 +772,7 @@ mod tests {
         assert_eq!(r.rushed_keep_strategy, Some(Strategy::FrontRunner));
         assert_eq!(r.rushed_keep_style(), Strategy::FrontRunner as i64);
 
-        // The pacer promotion / `ChangeStrategy` move the live field.
+        // `ChangeStrategy` moves the live field.
         r.position_keep_strategy = Strategy::Runaway;
         assert_eq!(r.rushed_keep_style(), Strategy::FrontRunner as i64);
 
