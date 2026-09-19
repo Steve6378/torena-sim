@@ -1599,6 +1599,28 @@ pub fn build_catalog() -> ConditionCatalog {
             })
             .build(),
     );
+    // `remain_distance` is quantised to whole meters: the doc (docs/mechanics
+    // README, "remain_distance") computes it as the *integer* course distance
+    // minus the uma's position rounded down, so
+    //
+    //     remain(pos) = distance - floor(pos)
+    //
+    // Every arm below is that identity solved for `pos`, with `D = distance`
+    // and both `D` and `arg` integers (so `D - arg` is an integer too):
+    //
+    //   `== arg` -> floor(pos) == D - arg      -> `[D - arg, D - arg + 1)`
+    //   `<= arg` -> floor(pos) >= D - arg      -> `[D - arg, D)`
+    //   `<  arg` -> floor(pos) >= D - arg + 1  -> `[D - arg + 1, D)`
+    //   `>= arg` -> floor(pos) <= D - arg      -> `[0, D - arg + 1)`
+    //   `>  arg` -> floor(pos) <= D - arg - 1  -> `[0, D - arg)`
+    //
+    // Each non-strict arm is a whole meter wider than its strict twin, which is
+    // the doc's own example: "remain_distance>=399 can actually trigger at
+    // remain_distance>=398.000001" — a meter past `D - 399` the floor still
+    // reads `D - 399`, so `>= 399` still holds and the clip must run to
+    // `D - 399 + 1`. The strict and non-strict bounds are therefore a whole
+    // step apart and each needs its own clip; `gte_gt`/`lte_lt` must not be
+    // used here.
     add(
         "remain_distance",
         immediate()
@@ -1614,19 +1636,14 @@ pub fn build_catalog() -> ConditionCatalog {
                 pass(p.regions.rmap(move |r| r.intersect(&bounds)))
             })
             .lt(|p| {
-                // `remain_distance` is quantised to whole meters: the doc computes
-                // it as the (integer) course distance minus the position rounded
-                // down, which is what the `eq` arm above spells out as the
-                // one-meter window `[distance - arg, distance - arg + 1)`. So the
-                // strict bound is NOT the non-strict one: `< arg` first holds a
-                // whole meter later, where the floor reads `arg - 1`. The `>` side
-                // needs no such shift — `> arg` is `>= arg + 1`, i.e. the floor
-                // must be strictly below `distance - arg`, which is exactly the
-                // half-open window the `>=` arm already clips to.
                 let bounds = Region::new(p.course.distance - p.arg as f64 + 1.0, p.course.distance);
                 pass(p.regions.rmap(move |r| r.intersect(&bounds)))
             })
-            .gte_gt(|p| {
+            .gte(|p| {
+                let bounds = Region::new(0.0, p.course.distance - p.arg as f64 + 1.0);
+                pass(p.regions.rmap(move |r| r.intersect(&bounds)))
+            })
+            .gt(|p| {
                 let bounds = Region::new(0.0, p.course.distance - p.arg as f64);
                 pass(p.regions.rmap(move |r| r.intersect(&bounds)))
             })
@@ -2523,9 +2540,9 @@ mod tests {
         assert_eq!(gt.0, vec![Region::new(1200.0, 2400.0)]);
         // `remain_distance` is the exception: it is quantised to whole meters
         // (`remain_distance==500` is the one-meter window `[1900, 1901)`), so its
-        // strict bounds are a meter off the non-strict ones. `> 500` is `>= 501`,
-        // i.e. the floor below 1900 — the same clip. `< 500` is `<= 499`, which
-        // does not start until 1901.
+        // strict bounds are a meter off the non-strict ones and each comparison
+        // needs its own clip. `> 500` is `>= 501`, i.e. the floor strictly below
+        // 1900; `< 500` is `<= 499`, which does not start until 1901.
         let (remain_gt, _) = apply("remain_distance>500");
         assert_eq!(remain_gt.0, vec![Region::new(0.0, 1900.0)]);
         let (remain_eq, _) = apply("remain_distance==500");
@@ -2534,6 +2551,44 @@ mod tests {
         assert_eq!(remain_lte.0, vec![Region::new(1900.0, 2400.0)]);
         let (remain_lt, _) = apply("remain_distance<500");
         assert_eq!(remain_lt.0, vec![Region::new(1901.0, 2400.0)]);
+    }
+
+    #[test]
+    fn remain_distance_gte_keeps_the_meter_the_floor_still_reads() {
+        // The doc (docs/mechanics README, "remain_distance"): the condition is
+        // "the course distance (an integer) minus the uma's current position
+        // rounded down", so `remain_distance>=399 can actually trigger at
+        // remain_distance>=398.000001`. On this 2400 m course `>= 399` therefore
+        // holds while `floor(pos) <= 2001`, i.e. right up to (but not including)
+        // pos 2002 — a whole meter past the naive `2400 - 399 = 2001` cut the
+        // non-strict arm used to clip to, which excluded exactly the meter the
+        // doc says fires.
+        let (gte_399, cond) = apply("remain_distance>=399");
+        assert!(cond.is_none());
+        assert_eq!(gte_399.0, vec![Region::new(0.0, 2002.0)]);
+        // The doc's own example position: real remaining 398.000001 m, so
+        // pos = 2400 - 398.000001, floor 2001, remain_distance 399 -> fires.
+        let doc_example = 2400.0 - 398.000_001;
+        let window = gte_399.0[0];
+        assert!(
+            window.start <= doc_example && doc_example < window.end,
+            "doc example pos {doc_example} must be inside {window:?}"
+        );
+        // One more meter on the floor reads 2002, so remain_distance is 398 and
+        // the condition is done: the window is half-open, excluding pos 2002.
+        assert!(!(window.start <= 2002.0 && 2002.0 < window.end));
+
+        // The arms must agree on the quantum: `>= arg` and `<= arg` overlap on
+        // exactly the one-meter `== arg` window, and `> arg` is the exact
+        // complement of `<= arg` over the course.
+        let (gte, _) = apply("remain_distance>=500");
+        assert_eq!(gte.0, vec![Region::new(0.0, 1901.0)]);
+        let (eq, _) = apply("remain_distance==500");
+        assert_eq!(eq.0, vec![Region::new(1900.0, 1901.0)]);
+        let (lte, _) = apply("remain_distance<=500");
+        assert_eq!(lte.0, vec![Region::new(1900.0, 2400.0)]);
+        let (gt, _) = apply("remain_distance>500");
+        assert_eq!(gt.0, vec![Region::new(0.0, 1900.0)]);
     }
 
     #[test]
