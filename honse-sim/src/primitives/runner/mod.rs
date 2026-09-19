@@ -498,6 +498,11 @@ pub struct Runner {
     pub speed_contributions: SpeedContributions,
     /// Cooldown timer gating re-entry into a state.
     pub pos_keep_next_timer: Timer,
+    /// Number of position-keep checks this runner has actually performed this
+    /// round (incremented by `position_keep::handle_none`, the only place a
+    /// check happens). Read by the pacer election to hold the opening
+    /// pacemaker's role for her first checks; nothing else looks at it.
+    pub pos_keep_checks_run: i64,
     /// Behind-distance threshold at which a pace-up/down state exits.
     pub pos_keep_exit_distance: f64,
     /// Position at which the current state exits.

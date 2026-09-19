@@ -97,6 +97,7 @@ pub fn calculate_pos_keep_end(section_length: f64, multiplier: f64) -> f64 {
 pub fn initialize_position_keep(runner: &mut Runner, course_distance: f64, end_multiplier: f64) {
     runner.position_keep_state = PositionKeepState::None;
     runner.pos_keep_next_timer = Timer::new(0.0);
+    runner.pos_keep_checks_run = 0;
     runner.pos_keep_speed_coef = 1.0;
     runner.pos_keep_exit_distance = 0.0;
     runner.pos_keep_exit_position = 0.0;
@@ -210,8 +211,11 @@ fn enter_from_none_front_runner(runner: &mut Runner, ctx: &PositionKeepContext) 
 /// after one section. Across every frame from 3 s the leader of that style is
 /// inside the pace-down band in 7 of 431 frames, and in 0 of the 292 frames she
 /// leads. So the exemption belongs to the role, not to the runner: she keeps it
-/// while she leads her style and loses it at the first check after the role
-/// moves, which is what the recordings' own handover looks like (the holder
+/// while she holds the role and loses it at the first check after the role
+/// moves. When that is depends on the role's own opening hold
+/// ([`PACEMAKER_HOLD_CHECKS`](crate::pacing::PACEMAKER_HOLD_CHECKS)), which
+/// cannot release before her second check: her earliest pace-down is therefore
+/// the third check, 4 s in, and that is where the recordings have it (the holder
 /// steps down to 0.915 between the 4.26 s and 5.33 s frames in 8 of the 9 races
 /// where she loses a frame at the start, and never in the 12 where she does
 /// not).
@@ -283,6 +287,11 @@ fn handle_none(runner: &mut Runner, ctx: &PositionKeepContext, behind: f64) {
     if runner.pos_keep_next_timer.t < 0.0 {
         return;
     }
+
+    // This is the check the doc counts (§ Position Keeping: "a check to enter
+    // non-normal modes is performed every 2 seconds"), and the only place one
+    // happens. `pacing::PACEMAKER_HOLD_CHECKS` reads the tally.
+    runner.pos_keep_checks_run += 1;
 
     if strategy_matches(runner.position_keep_strategy, Strategy::FrontRunner) {
         enter_from_none_front_runner(runner, ctx);
@@ -438,10 +447,42 @@ mod tests {
     #[test]
     fn initialize_sets_thresholds_and_end() {
         let mut r = runner(Strategy::PaceChaser, 0.0);
+        r.pos_keep_checks_run = 7;
         initialize_position_keep(&mut r, 2400.0, 3.0);
         assert_eq!(r.position_keep_state, PositionKeepState::None);
         assert_eq!(r.pos_keep_end, 300.0);
         assert!(r.pos_keep_max_threshold > r.pos_keep_min_threshold);
+        assert_eq!(r.pos_keep_checks_run, 0, "the check tally is per round");
+    }
+
+    /// The tally counts checks that actually ran, which is what the pacemaker's
+    /// opening hold is measured in: a tick inside the cooldown is not a check,
+    /// and neither is a tick with no pacer to measure against.
+    #[test]
+    fn only_a_check_that_runs_is_counted() {
+        let mut r = runner(Strategy::PaceChaser, 50.0);
+        r.is_rushed = true;
+        initialize_position_keep(&mut r, 2400.0, 3.0);
+        let mut c = ctx(Some(50.0), true, None);
+        c.pacer_strategy = Some(Strategy::PaceChaser);
+
+        // The opening frame's check: the timer starts at 0.0.
+        apply_virtual_position_keep(&mut r, &c);
+        assert_eq!(r.pos_keep_checks_run, 1);
+
+        // Inside the 2 s cooldown it re-armed: no check, no count.
+        apply_virtual_position_keep(&mut r, &c);
+        assert_eq!(r.pos_keep_checks_run, 1);
+
+        // Two seconds later, the next one runs.
+        r.pos_keep_next_timer.t = 0.0;
+        apply_virtual_position_keep(&mut r, &c);
+        assert_eq!(r.pos_keep_checks_run, 2);
+
+        // A tick with no pacer at all performs no check either.
+        r.pos_keep_next_timer.t = 0.0;
+        apply_virtual_position_keep(&mut r, &ctx(None, false, None));
+        assert_eq!(r.pos_keep_checks_run, 2);
     }
 
     #[test]

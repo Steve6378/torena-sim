@@ -80,6 +80,13 @@ pub struct FieldOrderTracker {
     pub pacer: Option<RunnerId>,
     /// Current pacer position (for the observation view).
     pub pacer_position: Option<f64>,
+    /// The runner elected pacemaker on the opening frame of a front-less round.
+    /// Recorded so [`select_pacer`] can hold the role for her first
+    /// [`PACEMAKER_HOLD_CHECKS`](crate::pacing::PACEMAKER_HOLD_CHECKS) checks;
+    /// the hold expires on her own check tally, so this is set once per round and
+    /// never cleared. `None` in a fronted field, where the exact-strategy pass
+    /// answers on every frame and the hold is never consulted.
+    pub opening_pacemaker: Option<RunnerId>,
     /// Current finishing order.
     pub runner_order: HashMap<RunnerId, i64>,
     /// Previous-tick finishing order.
@@ -96,6 +103,7 @@ impl FieldOrderTracker {
     pub fn reset(&mut self) {
         self.pacer = None;
         self.pacer_position = None;
+        self.opening_pacemaker = None;
         self.runner_order.clear();
         self.previous_runner_order.clear();
     }
@@ -116,18 +124,31 @@ impl FieldOrderTracker {
 /// reads, so her style-mates no longer see a synthetic Front Runner ahead of
 /// them either. The exemption that keeps her out of pace down is in
 /// [`enter_from_none_pacer`](crate::position_keep).
+///
+/// The one piece of pacer history it keeps is `tracker.opening_pacemaker`: who
+/// the opening frame elected, which [`select_pacer`] holds the role for over her
+/// first [`PACEMAKER_HOLD_CHECKS`](crate::pacing::PACEMAKER_HOLD_CHECKS) checks.
 pub fn build_field_snapshot(
     runners: &[Runner],
     finished_runners: &[RunnerId],
     tracker: &mut FieldOrderTracker,
 ) -> FieldSnapshot {
-    let pacer = select_pacer(runners, tracker.pacer);
+    let opening = tracker.pacer.is_none();
+    let pacer = select_pacer(runners, tracker.pacer, tracker.opening_pacemaker);
     let mut pacer_strategy = None;
     tracker.pacer = pacer;
     tracker.pacer_position = None;
     if let Some(runner) = pacer.and_then(|id| runners.iter().find(|r| r.id == id)) {
         tracker.pacer_position = Some(runner.position);
         pacer_strategy = Some(runner.position_keep_strategy);
+        // Record who the opening frame elected, for the hold in `select_pacer`.
+        // Her own style says which pass chose her: the exact-strategy pass picks
+        // only a Runaway or a Front Runner, so anyone else came from the
+        // front-less walk, and a fronted field never records a hold it would
+        // never consult.
+        if opening && !strategy_matches(runner.position_keep_strategy, Strategy::FrontRunner) {
+            tracker.opening_pacemaker = Some(runner.id);
+        }
     }
 
     let entries: Vec<SnapEntry> = runners
@@ -447,8 +468,9 @@ mod tests {
     /// pacemaker's `position_keep_strategy` to Front Runner right here and left
     /// it there, so she kept position as a front runner and answered the
     /// exact-strategy pass of `select_pacer` for the rest of the race. Now the
-    /// snapshot publishes her real style and the role follows the leader of the
-    /// most forward style, frame by frame.
+    /// snapshot publishes her real style, holds the opening election for her
+    /// first `PACEMAKER_HOLD_CHECKS` checks, and then lets the role follow the
+    /// leader of the most forward style frame by frame.
     #[test]
     fn a_front_less_snapshot_rewrites_nobody_and_lets_the_role_move() {
         use crate::runner::test_support::test_runner;
@@ -473,15 +495,49 @@ mod tests {
         assert_eq!(snap.pacer, Some(RunnerId(0)));
         assert_eq!(snap.pacer_strategy, Some(Strategy::PaceChaser));
 
-        // A later frame with her style-mate in front: the role moves with the
-        // lead, and every runner still owns the style she started with.
+        assert_eq!(tracker.opening_pacemaker, Some(RunnerId(0)));
+
+        // A later frame with her style-mate in front, still inside her hold:
+        // the role stays with her.
         runners[1].position = 12.0;
+        let snap = build_field_snapshot(&runners, &[], &mut tracker);
+        assert_eq!(snap.pacer, Some(RunnerId(0)));
+
+        // Past her hold: the role moves with the lead, and every runner still
+        // owns the style she started with.
+        runners[0].pos_keep_checks_run = crate::pacing::PACEMAKER_HOLD_CHECKS;
         let snap = build_field_snapshot(&runners, &[], &mut tracker);
         assert_eq!(snap.pacer, Some(RunnerId(1)));
         assert_eq!(snap.pacer_strategy, Some(Strategy::PaceChaser));
         assert!(runners
             .iter()
             .all(|r| r.position_keep_strategy == r.strategy));
+    }
+
+    /// A fronted field records no hold: the exact-strategy pass answers on every
+    /// frame there, so the opening election is never held and could never be
+    /// consulted if it were.
+    #[test]
+    fn a_fronted_snapshot_records_no_opening_hold() {
+        use crate::runner::test_support::test_runner;
+
+        let runners: Vec<Runner> = [
+            (0_u32, Strategy::PaceChaser),
+            (1, Strategy::FrontRunner),
+            (2, Strategy::LateSurger),
+        ]
+        .into_iter()
+        .map(|(id, strategy)| {
+            let mut r = test_runner(id, strategy);
+            r.gate = i64::from(id);
+            r
+        })
+        .collect();
+        let mut tracker = FieldOrderTracker::new();
+
+        let snap = build_field_snapshot(&runners, &[], &mut tracker);
+        assert_eq!(snap.pacer, Some(RunnerId(1)));
+        assert_eq!(tracker.opening_pacemaker, None);
     }
 
     #[test]

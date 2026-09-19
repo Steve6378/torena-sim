@@ -341,6 +341,7 @@ impl Runner {
             pos_keep_speed_coef: 1.0,
             speed_contributions: SpeedContributions::default(),
             pos_keep_next_timer: Timer::new(0.0),
+            pos_keep_checks_run: 0,
             pos_keep_exit_distance: 0.0,
             pos_keep_exit_position: 0.0,
             pos_keep_min_threshold: 0.0,
