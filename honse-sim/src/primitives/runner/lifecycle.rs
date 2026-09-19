@@ -290,6 +290,7 @@ impl Runner {
             rushed_max_duration: 12.0,
             rushed_activations: Vec::new(),
             pre_rushed_pos_keep_strategy: props.strategy,
+            rushed_keep_strategy: None,
             forced_rushed_index: 0,
             is_in_forced_rushed: false,
             has_dueled: false,

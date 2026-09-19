@@ -116,6 +116,7 @@ impl Runner {
         self.rushed_snap_marks_rolled = 0;
         self.rushed_max_duration = 12.0;
         self.rushed_activations.clear();
+        self.rushed_keep_strategy = None;
         self.forced_rushed_index = 0;
         self.is_in_forced_rushed = false;
 
@@ -265,6 +266,7 @@ impl Runner {
             self.is_rushed = false;
             self.is_in_forced_rushed = false;
             self.position_keep_strategy = self.pre_rushed_pos_keep_strategy;
+            self.rushed_keep_strategy = None;
             self.forced_rushed_index += 1;
             self.close_last_rushed_activation();
             return true;
@@ -284,9 +286,15 @@ impl Runner {
     }
 
     /// While rushed, position-keep behavior is forced by strategy bucket.
+    ///
+    /// The pick is also kept in
+    /// [`rushed_keep_strategy`](Runner::rushed_keep_strategy) for the length of
+    /// the spell: `position_keep_strategy` is reassigned later by the pacer
+    /// promotion and by `ChangeStrategy`, so it is not a record of what the
+    /// override chose.
     fn apply_rushed_strategy_override(&mut self) {
         let roll = self.rushed_rng.random();
-        self.position_keep_strategy = match self.strategy {
+        let target = match self.strategy {
             Strategy::Runaway | Strategy::FrontRunner | Strategy::PaceChaser => {
                 Strategy::FrontRunner
             }
@@ -307,11 +315,14 @@ impl Runner {
                 }
             }
         };
+        self.position_keep_strategy = target;
+        self.rushed_keep_strategy = Some(target);
     }
 
     fn leave_rushed(&mut self) {
         self.is_rushed = false;
         self.position_keep_strategy = self.pre_rushed_pos_keep_strategy;
+        self.rushed_keep_strategy = None;
         self.close_last_rushed_activation();
     }
 
@@ -743,6 +754,79 @@ mod tests {
         let mut r = test_runner(0, Strategy::PaceChaser);
         r.apply_rushed_strategy_override();
         assert_eq!(r.position_keep_strategy, Strategy::FrontRunner);
+    }
+
+    /// The override's pick is recorded for the spell, and stays the pick even
+    /// after `position_keep_strategy` is reassigned under it (the pacer
+    /// promotion and `ChangeStrategy` both do that mid-spell). The recorded
+    /// tournament spells never change mode inside a spell (0 of 143), so the
+    /// replay label has to read this and not the live field.
+    #[test]
+    fn rushed_override_records_its_pick_for_the_whole_spell() {
+        use crate::events::RunnerObservation;
+
+        let mut r = test_runner(0, Strategy::PaceChaser);
+        assert_eq!(r.rushed_keep_style(), 0);
+
+        r.position = 500.0;
+        r.enter_rushed();
+        assert_eq!(r.rushed_keep_strategy, Some(Strategy::FrontRunner));
+        assert_eq!(r.rushed_keep_style(), Strategy::FrontRunner as i64);
+
+        // The pacer promotion / `ChangeStrategy` move the live field.
+        r.position_keep_strategy = Strategy::Runaway;
+        assert_eq!(r.rushed_keep_style(), Strategy::FrontRunner as i64);
+
+        r.leave_rushed();
+        assert_eq!(r.rushed_keep_style(), 0);
+    }
+
+    /// The pick stays inside the override's own reachability sets
+    /// (`docs/mechanics/README.md`, Rushed State), which is what the recorded
+    /// spells show: pace chasers 57/57 NIGE, late surgers NIGE 23 / SENKO 13
+    /// and never SASHI, end closers 17/2/3.
+    #[test]
+    fn rushed_override_pick_stays_in_the_documented_reachability_sets() {
+        for (style, reachable) in [
+            (Strategy::Runaway, &[Strategy::FrontRunner][..]),
+            (Strategy::FrontRunner, &[Strategy::FrontRunner][..]),
+            (Strategy::PaceChaser, &[Strategy::FrontRunner][..]),
+            (
+                Strategy::LateSurger,
+                &[Strategy::FrontRunner, Strategy::PaceChaser][..],
+            ),
+            (
+                Strategy::EndCloser,
+                &[
+                    Strategy::FrontRunner,
+                    Strategy::PaceChaser,
+                    Strategy::LateSurger,
+                ][..],
+            ),
+        ] {
+            let mut r = test_runner(0, style);
+            let mut seen: Vec<Strategy> = Vec::new();
+            // One runner, many rolls: the override draws from `rushed_rng`, so
+            // repeating it walks the stream over every branch.
+            for _ in 0..400 {
+                r.apply_rushed_strategy_override();
+                let pick = r
+                    .rushed_keep_strategy
+                    .expect("the override records its pick");
+                assert!(
+                    reachable.contains(&pick),
+                    "{style:?} picked {pick:?}, outside {reachable:?}"
+                );
+                if !seen.contains(&pick) {
+                    seen.push(pick);
+                }
+            }
+            assert_eq!(
+                seen.len(),
+                reachable.len(),
+                "{style:?} never reached every documented branch: {seen:?}"
+            );
+        }
     }
 
     #[test]

@@ -41,14 +41,35 @@ const EVENT_SKILL: i8 = 3;
 /// `block_front_horse_index` when nothing is in front.
 const NO_BLOCKER: i8 = -1;
 
-/// `TemptationMode` as the game names it. A rushed runner is tagged by the
-/// style it is rushing in; the game has no oikomi variant, so end closers
-/// share the sashi one.
-fn temptation_mode(rushed: bool, running_style: i64) -> i8 {
+/// `TemptationMode` as the game names it: `0` calm, `1` SASHI, `2` SENKO,
+/// `3` NIGE, `4` BOOST.
+///
+/// A rushed runner is tagged by the style the rushed override sent her to, not
+/// by the style she entered the race with -- except for front runners and
+/// runaways, whom the override cannot move any further forward and who get the
+/// speed-up bucket instead (`docs/mechanics/README.md`, Rushed State: "Front
+/// Runners will enter speed up mode", while pace chasers become front runners,
+/// late surgers 75/25 and end closers 70/20/10). `running_style` is therefore
+/// only consulted for that branch; every other mode reads the override's own
+/// pick, which the runner records for the length of the spell.
+///
+/// Evidence, over the 143 rushed spells recorded in the tournament capture set
+/// (12 runners, 15 courses): mode 4 on 28 of 28 rushed front runners and
+/// runaways and on nobody else; pace chasers 57/57 NIGE; late surgers NIGE 23 /
+/// SENKO 13 and never SASHI; end closers 17/2/3 -- the override's own
+/// reachability sets and its 75/25 and 70/20/10 branches (p 0.12, 0.41). The
+/// mode never changes inside a spell (0 of 143), which is why the pick is read
+/// from the recorded value rather than from the live `position_keep_strategy`.
+/// The game has no oikomi mode, and the override never targets End Closer, so
+/// `1` (SASHI) is the Late Surger bucket.
+fn temptation_mode(rushed: bool, running_style: i64, rushed_keep_style: i64) -> i8 {
     if !rushed {
         return 0;
     }
-    match running_style {
+    if running_style == Strategy::FrontRunner as i64 || running_style == Strategy::Runaway as i64 {
+        return 4;
+    }
+    match rushed_keep_style {
         s if s == Strategy::FrontRunner as i64 || s == Strategy::Runaway as i64 => 3,
         s if s == Strategy::PaceChaser as i64 => 2,
         _ => 1,
@@ -190,7 +211,11 @@ impl ReplayInner {
                 .current_health()
                 .round()
                 .clamp(0.0, f64::from(u16::MAX)) as u16,
-            temptation_mode: temptation_mode(runner.is_rushed(), running_style),
+            temptation_mode: temptation_mode(
+                runner.is_rushed(),
+                running_style,
+                runner.rushed_keep_style(),
+            ),
             block_front_horse_index: runner.front_blocker().map_or(NO_BLOCKER, |id| id.0 as i8),
         };
 
@@ -474,6 +499,7 @@ mod tests {
         wit: i64,
         style: i64,
         rushed: bool,
+        rushed_keep: i64,
         last_spurt: bool,
         finish_time: f64,
         start_delay: f64,
@@ -507,6 +533,9 @@ mod tests {
         }
         fn is_rushed(&self) -> bool {
             self.rushed
+        }
+        fn rushed_keep_style(&self) -> i64 {
+            self.rushed_keep
         }
         fn is_last_spurt(&self) -> bool {
             self.last_spurt
@@ -737,14 +766,120 @@ mod tests {
         assert!((events[0].frame_time - 1.0 / 15.0).abs() < 1e-6);
     }
 
+    /// A calm runner carries no mode, whatever the override last left behind.
     #[test]
-    fn a_rushed_runner_is_tagged_by_style() {
-        assert_eq!(temptation_mode(false, Strategy::FrontRunner as i64), 0);
-        assert_eq!(temptation_mode(true, Strategy::FrontRunner as i64), 3);
-        assert_eq!(temptation_mode(true, Strategy::Runaway as i64), 3);
-        assert_eq!(temptation_mode(true, Strategy::PaceChaser as i64), 2);
-        assert_eq!(temptation_mode(true, Strategy::LateSurger as i64), 1);
-        assert_eq!(temptation_mode(true, Strategy::EndCloser as i64), 1);
+    fn a_calm_runner_is_tagged_zero() {
+        for style in [
+            Strategy::FrontRunner,
+            Strategy::PaceChaser,
+            Strategy::LateSurger,
+            Strategy::EndCloser,
+            Strategy::Runaway,
+        ] {
+            assert_eq!(temptation_mode(false, style as i64, 0), 0);
+            assert_eq!(
+                temptation_mode(false, style as i64, Strategy::FrontRunner as i64),
+                0
+            );
+        }
+    }
+
+    /// "Front Runners will enter speed up mode" (`docs/mechanics/README.md`,
+    /// Rushed State): mode 4, on 28 of 28 recorded rushed front runners and
+    /// runaways and on nobody else.
+    #[test]
+    fn a_rushed_front_runner_is_tagged_boost() {
+        for style in [Strategy::FrontRunner, Strategy::Runaway] {
+            // The override sends both to Front Runner; the label ignores that
+            // and reads the speed-up bucket off the base style.
+            assert_eq!(
+                temptation_mode(true, style as i64, Strategy::FrontRunner as i64),
+                4
+            );
+        }
+    }
+
+    /// Pace chasers become front runners, so they read NIGE: 57 of 57 recorded
+    /// rushed pace chasers, never SENKO.
+    #[test]
+    fn a_rushed_pace_chaser_is_tagged_nige() {
+        assert_eq!(
+            temptation_mode(
+                true,
+                Strategy::PaceChaser as i64,
+                Strategy::FrontRunner as i64
+            ),
+            3
+        );
+    }
+
+    /// Late surgers go 75/25 to Front Runner / Pace Chaser, so they read NIGE
+    /// or SENKO and never SASHI (recorded: NIGE 23, SENKO 13, SASHI 0).
+    #[test]
+    fn a_rushed_late_surger_is_never_tagged_sashi() {
+        for (target, expected) in [(Strategy::FrontRunner, 3), (Strategy::PaceChaser, 2)] {
+            let mode = temptation_mode(true, Strategy::LateSurger as i64, target as i64);
+            assert_eq!(mode, expected);
+            assert_ne!(mode, 1, "a late surger can never reach the SASHI bucket");
+        }
+    }
+
+    /// End closers are the only style that can reach SASHI, via the override's
+    /// 10% Late Surger branch (recorded: NIGE 17, SENKO 2, SASHI 3).
+    #[test]
+    fn a_rushed_end_closer_follows_its_three_way_override() {
+        for (target, expected) in [
+            (Strategy::FrontRunner, 3),
+            (Strategy::PaceChaser, 2),
+            (Strategy::LateSurger, 1),
+        ] {
+            assert_eq!(
+                temptation_mode(true, Strategy::EndCloser as i64, target as i64),
+                expected
+            );
+        }
+    }
+
+    /// The same mapping as it lands in the frame the collector emits.
+    #[test]
+    fn the_frame_column_carries_the_mode() {
+        let collector = RaceReplayCollector::new();
+        let mut obs = collector.handle();
+        obs.on_round_start(&TestRace { time: 0.0 }, 1);
+
+        let boost = TestRunner {
+            id: 0,
+            style: Strategy::FrontRunner as i64,
+            rushed: true,
+            rushed_keep: Strategy::FrontRunner as i64,
+            ..TestRunner::default()
+        };
+        let nige = TestRunner {
+            id: 1,
+            style: Strategy::PaceChaser as i64,
+            rushed: true,
+            rushed_keep: Strategy::FrontRunner as i64,
+            ..TestRunner::default()
+        };
+        let senko = TestRunner {
+            id: 2,
+            style: Strategy::LateSurger as i64,
+            rushed: true,
+            rushed_keep: Strategy::PaceChaser as i64,
+            ..TestRunner::default()
+        };
+        let calm = TestRunner {
+            id: 3,
+            style: Strategy::FrontRunner as i64,
+            ..TestRunner::default()
+        };
+        tick(&mut obs, 1.0 / 15.0, &[boost, nige, senko, calm]);
+        obs.on_round_end(&TestRace { time: 1.0 / 15.0 });
+
+        let rounds = collector.result();
+        let frame = &rounds[0].frames[1];
+        let modes: Vec<i8> = frame.horses.iter().map(|h| h.temptation_mode).collect();
+        assert_eq!(modes, vec![4, 3, 2, 0]);
     }
 
     #[test]

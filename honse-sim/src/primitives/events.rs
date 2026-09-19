@@ -142,6 +142,11 @@ pub trait RunnerObservation {
     fn is_rushed(&self) -> bool {
         false
     }
+    /// The strategy the rushed override picked for the current spell, as its
+    /// numeric discriminant (1 Front Runner .. 5 Runaway); `0` when not rushed.
+    fn rushed_keep_style(&self) -> i64 {
+        0
+    }
     /// Whether the runner is currently dueling.
     fn is_dueling(&self) -> bool {
         false

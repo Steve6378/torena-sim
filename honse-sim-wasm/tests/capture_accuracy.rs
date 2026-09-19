@@ -1076,9 +1076,12 @@ fn print_spell_tally(label: &str, tally: &SpellTally, divisor: f64) {
 /// The run's pooled rushed picture: spell durations on both sides, and the
 /// recorded `temptationMode` split against the simulated one. The recorded
 /// split is the enum the scoring flattens away; the engine tags a rushed runner
-/// by its style (`replay.rs`: front runner / runaway 3, pace chaser 2, else 1),
-/// so the two splits together say whether the rushed strategy override sends
-/// runners to the styles the game's recording shows.
+/// by the style the rushed override picked for her (`replay.rs`: front runner /
+/// runaway 4, else the override's target -- front runner 3, pace chaser 2, late
+/// surger 1), so the two splits together say whether the override sends runners
+/// to the styles the game's recording shows. The engine rolls its own rushed
+/// entries, so the two sides are not the same set of spells; the comparison is
+/// indicative, not a per-spell diff.
 fn print_rushed_summary(
     pooled: &SpellComparison,
     observed_modes: [usize; 4],
