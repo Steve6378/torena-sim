@@ -256,6 +256,7 @@ impl Runner {
             self.is_in_forced_rushed = true;
             self.pre_rushed_pos_keep_strategy = self.position_keep_strategy;
             self.rushed_timer.t = 0.0;
+            self.rushed_snap_marks_rolled = 0;
             self.rushed_activations.push((self.position, -1.0));
             self.apply_rushed_strategy_override();
         }
@@ -796,8 +797,9 @@ mod tests {
     }
 
     /// Drive a rushed spell one 1/15 s tick at a time and report the tick on
-    /// which it ended (the race loop advances the timers after the mechanic
-    /// update, so the timer is advanced first here too).
+    /// which it ended. `on_update` advances the timers (`update_timers`) before
+    /// it runs the mechanic updates, so the timer is advanced first here too
+    /// and `update_rushed` sees the same values it sees in a race.
     fn rushed_exit_tick(seed: u32, max_duration: f64) -> i64 {
         use crate::shared_kernel::rng::Xoshiro256StarStar;
         let mut r = test_runner(0, Strategy::PaceChaser);
