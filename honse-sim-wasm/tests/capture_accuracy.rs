@@ -8,7 +8,8 @@
 //!
 //! Two runs per fixture, each over `ACCURACY_SAMPLES` seeds (default 8; raise
 //! it when investigating one race, `ACCURACY_FIXTURE=<substring>` narrows the
-//! set):
+//! set, `ACCURACY_FIXTURE_DIR=<dir>` scores another fixture directory with its
+//! own `baseline.json`):
 //!
 //! - **free**: the engine rolls its own skill activations. Scores the whole
 //!   model, randomness included, against one drawn outcome.
@@ -296,8 +297,14 @@ struct RunnerAccumulator {
     fired: HashMap<i64, usize>,
 }
 
+/// `ACCURACY_FIXTURE_DIR=<dir>` scores a fixture set kept outside the crate
+/// (its own `baseline.json` lives beside those fixtures); default is the
+/// crate's `tests/fixtures/captures/`.
 fn fixture_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/captures")
+    std::env::var_os("ACCURACY_FIXTURE_DIR").map_or_else(
+        || Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/captures"),
+        PathBuf::from,
+    )
 }
 
 /// `ACCURACY_FIXTURE=<substring>` narrows a run to matching fixture files.
