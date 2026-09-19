@@ -174,13 +174,86 @@ With the three in widths (torena-sim#102), pinned means over 53 fixtures:
 finish MAE 0.205 to 0.203 s, trajectory 4.61 to 4.55 m, lane MAE 1.00 to
 0.98 m, Spearman 0.815 to 0.809.
 
-The pace-down lane, 0.18 in the doc, stays in meters. Read as widths (2.0 m)
-the pinned finish MAE is 0.217 s, and fixture
-`10903-special-week-74-3953s-20260830` goes from 0.208 to 0.626 s: its whole
-field runs 0.2 to 0.3 m/s slow through the mid-race and finishes 0.6 to 1.0 s
-late. The paced-down runner parks inside the bunch and the runners behind it
-stay front-blocked and speed-capped. Whether the game's value is 0.18 widths
-and the engine's bunching is the real difference is open.
+The pace-down lane, 0.18 in the doc, still stays in meters, but no longer
+because the unit is open. It is not: the recordings settle it at **course
+widths**, and the constant is held back only because correcting it exposes
+defects elsewhere in the pack model that this engine cannot yet cover.
+
+### Pace-down lane: unit settled, constant held back
+
+The unit. Under the band where normal mode is forced there are three
+paced-down runner-races on the rail with nobody inside them and no front
+blocker, so rule 2 is the only rule that can move them. Two of the three march
+outward for four to five seconds at the documented lane-change speed for their
+Power and reach 1639 and 1498 lane units (1/10000 course width); 0.18 m is 160
+units, 0.18 widths is 1800. A runner still stepping at the full lane-change
+speed has not reached the 0.5-horse-lane refresh radius (278 units), which
+bounds the target at 1758 units or more in the first case. Of 1379 matched
+runner-frames in the same state but not paced down, one moves out 1200 units
+and none 1500. `0.18` is course widths; the metres reading cannot produce
+either march.
+
+The regression, reproduced. Scaling rule 2 by the course width and changing
+nothing else, against the fork baseline (pinned, 53 fixtures, 8 seeds):
+
+| | finish MAE | trajectory MAE | lane MAE |
+|---|---|---|---|
+| fork baseline | 0.203 s | 4.545 m | 0.985 m |
+| rule 2 in widths | 0.217 s | 4.740 m | 0.972 m |
+
+The lane trajectory improves, including on both fixtures whose marches settled
+the unit (`nishino-flower-74-8612s` lane MAE 1.05 to 0.94 m,
+`yukino-bijin-74-7362s` 0.98 to 0.73 m). The finish times do not:
+`10903-special-week-74-3953s-20260830` goes from 0.208 to 0.626 s, its whole
+field 0.2 to 0.3 m/s slow through the mid-race. Per-tick traces of that fixture
+name the mechanism. At the first position-keep check six of the nine runners
+are already inside the pacemaker's minimum distance, so with rule 2 in widths
+six targets converge on the single lane 2.025 m and the field jams there;
+paced-down time over sections 1 to 10 rises from 11.8 to 21.3% of runner
+distance and pace-up time halves, which is the whole 0.2 m/s. The pacemaker
+herself ends up front-blocked by a paced-down runner at a 0.3 m lane gap and
+held to 0.988x her pace with no free candidate lane to escape into.
+
+Two documented gaps the correct constant exposes, both measured:
+
+- **Side blocking is read as a corridor, not a window.** The doc blocks on a
+  side only for a runner within 1.05 m along the course *and* under two horse
+  lanes across (§ Side Blocking); `side_space_free` blocks on any runner
+  anywhere between the runner and her target lane. With a target 0.18 m away
+  the two agree; with the target 2.025 m away the engine freezes runners the
+  doc leaves free. Adding the two-horse-lane window takes pinned finish MAE to
+  0.209 s, lane MAE to 0.967 m, trajectory to 4.645 m, and that fixture from
+  0.626 to 0.246 s. It is not the whole difference. Reading the same section's
+  "the uma with lowest lane gap determines how much space is available for
+  movement" as a movement bound instead (move up to the nearest side runner's
+  lane) is refuted outright: 0.292 s, the field over-spreads.
+- **Normal mode is never forced.** The doc uses normal mode "when there are no
+  overtake targets, **or** when uma is within 200 m before the move lane point
+  during early-race or mid-race" (§ Normal Mode); `resolve_target_lane` only
+  ever checks the first clause, so in that band the engine picks overtake
+  candidate lanes where the game runs the normal rules — which is where both
+  measured marches happen. Forcing normal mode there is the best lane
+  trajectory measured (pinned lane MAE 0.939 m) and still costs finish MAE
+  (0.219 s alone, 0.209 s with the window above).
+
+What is still missing, and why the constant stays in meters. § Position, World
+Transform: `DistanceAdd_world = DistanceAdd_course / max(1, ratio_prev /
+ratio_base)` — running wide while cornering, or moving lanes, costs course
+distance. The engine charges nothing for it. With rule 2 at 0.18 m nobody ran
+wide during position keeping and the gap was invisible; with the documented
+0.18 widths a large part of the field spends the mid-race 2 m off the rail and
+the engine gives them that width free, while the runners in the recordings pay
+for it. The ratio is a property of the course's 1001 keyframes (or at least
+each corner's radius), and neither the capture params nor the course DTO carry
+any of it, so it cannot be transcribed here. Until it can, flipping rule 2
+trades 0.006 s of finish MAE (0.203 to 0.209 s at best, 96 per-fixture
+baseline regressions) for 0.018 m of lane MAE, and the flip is not landed.
+
+Refuted while looking: making the first position-keep entry check happen at
+2 s rather than on the first tick, which the 2-second cadence in § Position
+Keeping could be read to require, costs 0.034 s of pinned finish MAE with the
+constant in either unit, so the engine's first-tick check is load-bearing and
+is not the defect.
 
 Firing normal-mode rule 3 from the final corner as well as the final straight,
 which the leader's move at 800 m suggests, changed nothing: finish MAE 0.206 s,
