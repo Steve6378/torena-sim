@@ -42,6 +42,23 @@ mod conserve_power {
     pub(super) const ACTIVITY_TIME_COEF: f64 = 1450.0;
 }
 
+/// Rushed (temptation) snap-out cadence, from the mechanics doc: "Every 3
+/// seconds while rushed, the uma has a 55% chance to snap out of it. Rushed
+/// ends if the uma is still affected after 12 seconds."
+mod rushed {
+    /// Seconds between snap-out rolls.
+    pub(super) const SNAP_INTERVAL: f64 = 3.0;
+    /// Chance of snapping out on a roll.
+    pub(super) const SNAP_CHANCE: f64 = 0.55;
+    /// Tolerance used when testing whether the rushed timer has reached a
+    /// cadence mark. The timer accumulates `1/15 s` in `f64`, so a mark can
+    /// land a few ULP *below* its exact value (6 s arrives as
+    /// `5.999999999999998`, 9 s as `8.999999999999988`). The tolerance is
+    /// many orders of magnitude smaller than a tick, so it only decides
+    /// which side of a boundary a tick that *is* the mark falls on.
+    pub(super) const SNAP_MARK_TOLERANCE: f64 = 1e-9;
+}
+
 /// Per-strategy dueling activation rates (percent) used by compare-mode
 /// `artificialDueling`.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -96,6 +113,7 @@ impl Runner {
         self.rushed_enter_position = -1.0;
         self.rushed_end_position = -1.0;
         self.rushed_timer.t = 0.0;
+        self.rushed_snap_marks_rolled = 0;
         self.rushed_max_duration = 12.0;
         self.rushed_activations.clear();
         self.forced_rushed_index = 0;
@@ -198,17 +216,28 @@ impl Runner {
             return;
         }
 
-        // Recovery check every 3 seconds (55% chance to snap out).
-        let t = self.rushed_timer.t;
-        if t > 0.0
-            && (t / 3.0).floor() > ((t - 0.017) / 3.0).floor()
-            && self.rushed_rng.random() < 0.55
-        {
+        // The spell ends unconditionally at the cap (12 s, +5 s per
+        // worsening debuff); the cap is checked first so a cadence mark that
+        // coincides with it does not consume a roll.
+        if self.rushed_timer.t >= self.rushed_max_duration {
             self.leave_rushed();
             return;
         }
-        if self.rushed_timer.t >= self.rushed_max_duration {
-            self.leave_rushed();
+
+        // Recovery roll at every 3 s mark of the spell (55% chance to snap
+        // out). The mark index is stored rather than rediscovered from a
+        // look-back window: at a 1/15 s tick the timer steps over most of the
+        // marks instead of landing on them, which is why only the first roll
+        // used to happen.
+        let mark = ((self.rushed_timer.t + rushed::SNAP_MARK_TOLERANCE) / rushed::SNAP_INTERVAL)
+            .floor() as i64;
+        if mark > self.rushed_snap_marks_rolled
+            && mark as f64 * rushed::SNAP_INTERVAL < self.rushed_max_duration
+        {
+            self.rushed_snap_marks_rolled = mark;
+            if self.rushed_rng.random() < rushed::SNAP_CHANCE {
+                self.leave_rushed();
+            }
         }
     }
 
@@ -248,6 +277,7 @@ impl Runner {
         self.pre_rushed_pos_keep_strategy = self.position_keep_strategy;
         self.has_been_rushed = true;
         self.rushed_timer.t = 0.0;
+        self.rushed_snap_marks_rolled = 0;
         self.rushed_activations.push((self.position, -1.0));
         self.apply_rushed_strategy_override();
     }
@@ -763,6 +793,70 @@ mod tests {
             (r.rushed_chance() - (base - 0.03)).abs() < 1e-12,
             "type-29 effect must lower the rushed chance by 0.03"
         );
+    }
+
+    /// Drive a rushed spell one 1/15 s tick at a time and report the tick on
+    /// which it ended (the race loop advances the timers after the mechanic
+    /// update, so the timer is advanced first here too).
+    fn rushed_exit_tick(seed: u32, max_duration: f64) -> i64 {
+        use crate::shared_kernel::rng::Xoshiro256StarStar;
+        let mut r = test_runner(0, Strategy::PaceChaser);
+        // `test_runner` leaves every sub-stream on the seed-0 placeholder;
+        // the snap-out rolls need one stream per sample.
+        r.rushed_rng = Box::new(Xoshiro256StarStar::from_u32_seed(seed));
+        r.position = 500.0;
+        r.enter_rushed();
+        r.rushed_max_duration = max_duration;
+        for tick in 1..=600 {
+            r.rushed_timer.advance(1.0 / 15.0);
+            r.update_rushed();
+            if !r.is_rushed {
+                return tick;
+            }
+        }
+        panic!("rushed never ended within 40 s");
+    }
+
+    #[test]
+    fn rushed_rerolls_the_snap_out_at_every_three_second_mark() {
+        // The doc: "Every 3 seconds while rushed, the uma has a 55% chance to
+        // snap out of it. Rushed ends if the uma is still affected after 12
+        // seconds." At 15 FPS the marks are ticks 45 / 90 / 135, and the cap
+        // lands on tick 181 (12 s of accumulated 1/15 s is 11.999999999999977
+        // at tick 180). Before the look-back detector was replaced only the
+        // first mark ever fired, so the duration was binary: 45 or 181.
+        let mut exits: Vec<i64> = (0..400u32)
+            .map(|seed| rushed_exit_tick(seed, 12.0))
+            .collect();
+        exits.sort_unstable();
+        exits.dedup();
+        assert_eq!(
+            exits,
+            vec![45, 90, 135, 181],
+            "snap-out must be re-rolled at 3 s, 6 s and 9 s, with the 12 s cap as the last exit"
+        );
+
+        // Each mark is an independent 55% roll, so the survival rates are
+        // 45% / 20.25% / 9.11% - i.e. about 55% of spells end on the first.
+        let first = (0..400u32)
+            .filter(|&seed| rushed_exit_tick(seed, 12.0) == 45)
+            .count();
+        assert!(
+            (150..=290).contains(&first),
+            "{first}/400 spells ended at the first mark, expected around 220"
+        );
+    }
+
+    #[test]
+    fn rushed_debuff_extension_adds_snap_out_marks() {
+        // A worsening debuff extends the cap by 5 s, so the 12 s and 15 s
+        // marks become live rolls instead of being pre-empted by the cap.
+        let mut exits: Vec<i64> = (0..400u32)
+            .map(|seed| rushed_exit_tick(seed, 17.0))
+            .collect();
+        exits.sort_unstable();
+        exits.dedup();
+        assert_eq!(exits, vec![45, 90, 135, 180, 225, 256]);
     }
 
     #[test]
