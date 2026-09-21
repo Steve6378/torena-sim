@@ -563,22 +563,36 @@ mod tests {
         assert_eq!(r.position_keep_state, PositionKeepState::PaceDown);
     }
 
-    /// A front-less pacemaker is not a front runner: speed up (1.04x) and
-    /// overtake (1.05x) stay behind the Front Runner / Runaway gate, so holding
-    /// the role never buys her either.
+    /// Speed up (1.04x) is gated on the keep-strategy, not on the role. The
+    /// same pacemaker, the same lead, the same wit check: a front runner enters
+    /// it and a front-less pacemaker keeping her own style does not, because
+    /// `handle_none` sends her to the non-front-runner branch, where holding
+    /// the role only exempts her. Overtake sits behind the same gate, one
+    /// branch further in.
     #[test]
-    fn a_front_less_pacemaker_gets_neither_speed_up_nor_overtake() {
-        let mut r = runner(Strategy::PaceChaser, 200.0);
-        r.is_rushed = true;
-        initialize_position_keep(&mut r, 2400.0, 3.0);
-        let mut c = ctx(Some(200.0), true, Some(197.0)); // a 3m lead, under 4.5m
-        c.pacer_strategy = Some(Strategy::PaceChaser);
+    fn speed_up_is_gated_on_the_front_runner_strategy_not_on_the_role() {
+        // A 3 m lead, under the 4.5 m threshold, so the front runner enters.
+        let front_ctx = |strategy| {
+            let mut c = ctx(Some(200.0), true, Some(197.0));
+            c.pacer_strategy = Some(strategy);
+            c
+        };
 
-        apply_virtual_position_keep(&mut r, &c);
+        let mut front = runner(Strategy::FrontRunner, 200.0);
+        front.is_rushed = true; // the wit check passes deterministically
+        initialize_position_keep(&mut front, 2400.0, 3.0);
+        apply_virtual_position_keep(&mut front, &front_ctx(Strategy::FrontRunner));
+        assert_eq!(front.position_keep_state, PositionKeepState::SpeedUp);
+        update_position_keep_coefficient(&mut front);
+        assert_eq!(front.pos_keep_speed_coef, 1.04);
 
-        assert_eq!(r.position_keep_state, PositionKeepState::None);
-        update_position_keep_coefficient(&mut r);
-        assert_eq!(r.pos_keep_speed_coef, 1.0);
+        let mut pacemaker = runner(Strategy::PaceChaser, 200.0);
+        pacemaker.is_rushed = true;
+        initialize_position_keep(&mut pacemaker, 2400.0, 3.0);
+        apply_virtual_position_keep(&mut pacemaker, &front_ctx(Strategy::PaceChaser));
+        assert_eq!(pacemaker.position_keep_state, PositionKeepState::None);
+        update_position_keep_coefficient(&mut pacemaker);
+        assert_eq!(pacemaker.pos_keep_speed_coef, 1.0);
     }
 
     /// With her real style published, her style-mates read the pacer as one of
