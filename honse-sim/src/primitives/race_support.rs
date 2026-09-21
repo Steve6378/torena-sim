@@ -11,7 +11,7 @@
 
 use std::collections::HashMap;
 
-use crate::pacing::select_pacer;
+use crate::pacing::{select_pacer, PacerBranch};
 use crate::runner::physics::{FrontBlock, RunnerSnapshot};
 use crate::runner::skills::FieldView;
 use crate::runner::Runner;
@@ -80,12 +80,11 @@ pub struct FieldOrderTracker {
     pub pacer: Option<RunnerId>,
     /// Current pacer position (for the observation view).
     pub pacer_position: Option<f64>,
-    /// The runner elected pacemaker on the opening frame of a front-less round.
-    /// Recorded so [`select_pacer`] can hold the role for her first
+    /// The runner the front-less election returned first, which is the opening
+    /// frame's. Recorded so [`select_pacer`] can hold the role for her first
     /// [`PACEMAKER_HOLD_CHECKS`](crate::pacing::PACEMAKER_HOLD_CHECKS) checks;
     /// the hold expires on her own check tally, so this is set once per round and
-    /// never cleared. `None` in a fronted field, where the exact-strategy pass
-    /// answers on every frame and the hold is never consulted.
+    /// never cleared. `None` in a fronted field, which never runs that election.
     pub opening_pacemaker: Option<RunnerId>,
     /// Current finishing order.
     pub runner_order: HashMap<RunnerId, i64>,
@@ -133,21 +132,21 @@ pub fn build_field_snapshot(
     finished_runners: &[RunnerId],
     tracker: &mut FieldOrderTracker,
 ) -> FieldSnapshot {
-    let opening = tracker.pacer.is_none();
-    let pacer = select_pacer(runners, tracker.pacer, tracker.opening_pacemaker);
+    let choice = select_pacer(runners, tracker.pacer, tracker.opening_pacemaker);
     let mut pacer_strategy = None;
-    tracker.pacer = pacer;
+    tracker.pacer = choice.map(|c| c.runner_id);
     tracker.pacer_position = None;
-    if let Some(runner) = pacer.and_then(|id| runners.iter().find(|r| r.id == id)) {
-        tracker.pacer_position = Some(runner.position);
-        pacer_strategy = Some(runner.position_keep_strategy);
-        // Record who the opening frame elected, for the hold in `select_pacer`.
-        // Her own style says which pass chose her: the exact-strategy pass picks
-        // only a Runaway or a Front Runner, so anyone else came from the
-        // front-less walk, and a fronted field never records a hold it would
-        // never consult.
-        if opening && !strategy_matches(runner.position_keep_strategy, Strategy::FrontRunner) {
-            tracker.opening_pacemaker = Some(runner.id);
+    if let Some(choice) = choice {
+        // The first runner the front-less election returns is the one its hold
+        // protects. `select_pacer` says which pass answered, so this reads no
+        // meaning into the frame number or into the elected runner's style; a
+        // fronted field never reports that pass, so it records nothing.
+        if choice.branch == PacerBranch::FrontLessElection && tracker.opening_pacemaker.is_none() {
+            tracker.opening_pacemaker = Some(choice.runner_id);
+        }
+        if let Some(runner) = runners.iter().find(|r| r.id == choice.runner_id) {
+            tracker.pacer_position = Some(runner.position);
+            pacer_strategy = Some(runner.position_keep_strategy);
         }
     }
 
