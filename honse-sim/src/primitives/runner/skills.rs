@@ -653,15 +653,16 @@ impl Runner {
                     let skill = self.pending_skills[i].clone();
                     self.activate_skill(&skill, course_distance);
                     // Mechanics doc § Skill Cooldown: a skill with a cooldown may
-                    // activate again once it has elapsed -- here only at a later
-                    // placed trigger (all_corner_random). A single-window skill
-                    // is NOT re-armed: on the 117 recordings, re-arming the
-                    // lane-time skills (See Ya Later!, Slipstream) makes them
-                    // repeat about ten times as often as the game does (30% of
-                    // carriers against 3-4%), which is further from the
-                    // recordings than never repeating. The wit check is once per
-                    // race.
-                    if skill.cooldown > 0.0 && !skill.later_triggers.is_empty() {
+                    // activate again once it has elapsed, in its own window or at
+                    // a later placed trigger (all_corner_random). The wit check
+                    // is once per race. Single-window skills were held out of
+                    // this while the lane-time conditions read the race clock:
+                    // re-armed, See Ya Later! and Slipstream repeated for 30% of
+                    // carriers against 3-4% on the 117 recordings. With those
+                    // conditions timed (patch 0020) they repeat for 6.7% and
+                    // 8.0%: still about twice the recordings, where never
+                    // repeating could not produce the 27 recorded repeats.
+                    if skill.cooldown > 0.0 {
                         let now = self.accumulate_time.t;
                         let same = |p: &PendingSkill| {
                             p.skill_id == skill.skill_id && p.trigger == skill.trigger
@@ -2291,9 +2292,10 @@ mod tests {
     }
 
     #[test]
-    fn a_single_window_skill_fires_once_even_with_a_cooldown() {
-        // Held deviation (see process_skill_activations): single-window skills
-        // are not re-armed.
+    fn a_single_window_skill_fires_again_after_its_cooldown() {
+        // See Ya Later!'s shape: one window, a 30 s base cooldown (72 s at
+        // 2400 m). It stays armed inside its window and fires again once the
+        // cooldown has run.
         let mut skill = target_speed_skill("201662", SkillRarity::White, "phase>=2");
         skill.alternatives[0].cooldown_time = Some(300000.0);
         let mut r = runner_with_skills(vec![skill]);
@@ -2301,7 +2303,13 @@ mod tests {
         r.wit_checks_enabled = false;
         activate_first(&mut r, &FieldView::at_gate());
         assert_eq!(r.skills_activated_count, 1);
-        assert!(r.pending_skills.is_empty());
+        assert_eq!(r.pending_skills.len(), 1, "still armed");
+        r.accumulate_time.advance(71.0);
+        r.process_skill_activations(&FieldView::at_gate(), 2400.0);
+        assert_eq!(r.skills_activated_count, 1, "inside the cooldown");
+        r.accumulate_time.advance(1.5);
+        r.process_skill_activations(&FieldView::at_gate(), 2400.0);
+        assert_eq!(r.skills_activated_count, 2, "after the cooldown");
     }
 
     #[test]
