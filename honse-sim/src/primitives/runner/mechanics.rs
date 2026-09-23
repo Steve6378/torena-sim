@@ -29,6 +29,12 @@ mod conserve_power {
     /// So the gauge still runs (its rushed / spot-struggle history feeds the
     /// release strength) but no longer gates the release.
     pub(super) const FULLY_CHARGED_THRESHOLD: f64 = 0.0;
+    /// The power Fully Charged is gated on (and sized by): the base stat plus
+    /// whatever gate skills added since the round began, leaving out the
+    /// ground modifier that `adjusted` carries.
+    pub(super) fn gate_power(base: f64, adjusted: f64, pristine_adjusted: f64) -> f64 {
+        base + (adjusted - pristine_adjusted)
+    }
     /// Gauge gain per 1.5s check while position keep is Pace Down.
     pub(super) const PACE_DOWN_GAIN: f64 = 6.7;
     /// Gauge gain per 1.5s check while position keep is Normal/None.
@@ -167,13 +173,18 @@ impl Runner {
     /// Initialize the Power Conservation / Fully Charged state.
     pub(crate) fn initialize_power_conservation(&mut self, distance_type: DistanceType) {
         self.is_fully_charged = false;
-        // The effective power stat -- mood, ground and the gate skills already
-        // applied (this runs after `activate_gate_skills`) -- not the raw one:
-        // on the recordings the 1200 gate splits runners by mood-adjusted power
-        // (above it 87 of 88 release, at or just under it about a third, the
-        // ones a power skill lifts), where raw power left every Great-mood
-        // runner between 1154 and 1200 out.
-        self.conserve_power_stat = self.adjusted_stats.power;
+        // The power the gate reads: the base stat (over-1200 halving and mood)
+        // plus what the gate skills added (this runs after
+        // `activate_gate_skills`), WITHOUT the ground modifier. On the 117
+        // recordings that split is 915 of 918 releasing above 1200 and, below
+        // it, exactly the 47 of 122 a fired power skill lifts over (0 of the
+        // 364 without one): 3 runners of 1404 misread. Reading the adjusted
+        // stat, ground included, misreads 317 (dirt costs up to 100 power).
+        self.conserve_power_stat = conserve_power::gate_power(
+            self.base_stats.power,
+            self.adjusted_stats.power,
+            self.pristine_adjusted_stats.power,
+        );
         self.conserved_power = 0.0;
         self.last_conserve_power_check_frame = 0;
         self.conserve_power_saw_rushed = false;
@@ -1097,6 +1108,22 @@ mod tests {
         assert!((r.conserved_power - 4.2 * 0.95 * 0.8).abs() < 1e-9);
         assert!(r.conserve_power_saw_spot_struggle);
         assert!(r.conserve_power_saw_rushed);
+    }
+
+    #[test]
+    fn the_gate_power_leaves_the_ground_out_and_keeps_power_skills() {
+        // 1274 raw at Great mood: 1237 after the over-1200 halving, x 1.04.
+        let base = 1237.0 * 1.04;
+        // Firm dirt costs 100 power: the adjusted stat falls under 1200...
+        let pristine = base - 100.0;
+        assert!(pristine <= 1200.0);
+        // ...but the gate reads the base stat, as the recordings do.
+        let gate = super::conserve_power::gate_power(base, pristine, pristine);
+        assert!((gate - base).abs() < 1e-9 && gate > 1200.0);
+        // A 60-point power skill at the gate counts.
+        let lifted =
+            super::conserve_power::gate_power(1150.0, 1150.0 - 100.0 + 60.0, 1150.0 - 100.0);
+        assert!((lifted - 1210.0).abs() < 1e-9);
     }
 
     #[test]
