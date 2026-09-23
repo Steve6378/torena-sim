@@ -277,6 +277,7 @@ pub fn build_skill_data(params: &BuildSkillDataParams<'_>) -> Vec<SkillTrigger> 
                 extra_condition,
                 target_strategy: derive_target_strategy(&alt.condition),
                 duration_scaling: alt.duration_scaling,
+                cooldown_time: alt.cooldown_time,
             });
         }
     }
@@ -306,6 +307,7 @@ pub fn build_skill_data(params: &BuildSkillDataParams<'_>) -> Vec<SkillTrigger> 
         extra_condition: Some(DynamicCondition::new(|_| false)),
         target_strategy: None,
         duration_scaling: first.duration_scaling,
+        cooldown_time: first.cooldown_time,
     }]
 }
 
@@ -403,12 +405,20 @@ impl Runner {
                     Some(pos) => ActivationSamplePolicy::Fixed(pos),
                     None => trigger.sample_policy,
                 };
-                let samples =
-                    policy.sample(&trigger.regions, ctx.skill_samples, &mut *self.skill_rng);
-                if samples.is_empty() {
+                let sets =
+                    policy.sample_sets(&trigger.regions, ctx.skill_samples, &mut *self.skill_rng);
+                if sets.is_empty() {
                     continue;
                 }
-                let trigger_region = samples[ctx.round_iteration % samples.len()];
+                let set = &sets[ctx.round_iteration % sets.len()];
+                let trigger_region = set[0];
+                let cooldown = if forced {
+                    0.0
+                } else {
+                    trigger
+                        .cooldown_time
+                        .map_or(0.0, |c| c / 10000.0 * ctx.course.distance / 1000.0)
+                };
                 pending.push(PendingSkill {
                     skill_id: trigger.skill_id,
                     rarity: trigger.rarity,
@@ -422,6 +432,14 @@ impl Runner {
                     },
                     target_strategy: trigger.target_strategy,
                     duration_scaling: trigger.duration_scaling,
+                    cooldown,
+                    later_triggers: if forced {
+                        Vec::new()
+                    } else {
+                        set[1..].to_vec()
+                    },
+                    ready_at: f64::NEG_INFINITY,
+                    wit_passed: false,
                     forced,
                 });
             }
@@ -454,6 +472,10 @@ impl Runner {
                     extra_condition: None,
                     target_strategy: derive_target_strategy(&alt.condition),
                     duration_scaling: alt.duration_scaling,
+                    cooldown: 0.0,
+                    later_triggers: Vec::new(),
+                    ready_at: f64::NEG_INFINITY,
+                    wit_passed: false,
                     forced: true,
                 });
                 break;
@@ -563,19 +585,62 @@ impl Runner {
                 (s.trigger, s.skill_id.0.clone(), s.forced)
             };
 
-            if self.position >= trigger.end || self.pending_skill_removal.contains(&skill_id) {
+            let removal = self.pending_skill_removal.contains(&skill_id);
+            if self.position >= trigger.end && !removal {
+                // Passed this window: move on to the next placed trigger, if any
+                // (all_corner_random), else the skill is done.
+                let pending = &mut self.pending_skills[i];
+                if !pending.later_triggers.is_empty() {
+                    pending.trigger = pending.later_triggers.remove(0);
+                    continue;
+                }
+            }
+            if self.position >= trigger.end || removal {
                 self.pending_skills.remove(i);
                 self.pending_skill_removal.remove(&skill_id);
                 continue;
             }
 
-            if self.position >= trigger.start && (forced || self.pending_extra_passes(i, field)) {
-                let skip = forced || self.should_skip_wit_check_at(i);
+            let cooled_down = self.accumulate_time.t >= self.pending_skills[i].ready_at;
+            if self.position >= trigger.start
+                && cooled_down
+                && (forced || self.pending_extra_passes(i, field))
+            {
+                let skip =
+                    forced || self.pending_skills[i].wit_passed || self.should_skip_wit_check_at(i);
                 if skip || self.do_wit_check() {
                     let skill = self.pending_skills[i].clone();
                     self.activate_skill(&skill, course_distance);
+                    // Mechanics doc § Skill Cooldown: a skill with a cooldown may
+                    // activate again once it has elapsed -- here only at a later
+                    // placed trigger (all_corner_random). A single-window skill
+                    // is NOT re-armed: on the 117 recordings, re-arming the
+                    // lane-time skills (See Ya Later!, Slipstream) makes them
+                    // repeat about ten times as often as the game does (30% of
+                    // carriers against 3-4%), which is further from the
+                    // recordings than never repeating. The wit check is once per
+                    // race.
+                    if skill.cooldown > 0.0 && !skill.later_triggers.is_empty() {
+                        let now = self.accumulate_time.t;
+                        let same = |p: &PendingSkill| {
+                            p.skill_id == skill.skill_id && p.trigger == skill.trigger
+                        };
+                        let at = if self.pending_skills.get(i).is_some_and(same) {
+                            Some(i)
+                        } else {
+                            self.pending_skills.iter().position(same)
+                        };
+                        if let Some(at) = at {
+                            let pending = &mut self.pending_skills[at];
+                            pending.ready_at = now + skill.cooldown;
+                            pending.wit_passed = true;
+                        }
+                        continue;
+                    }
                 }
-                self.pending_skills.remove(i);
+                if i < self.pending_skills.len() {
+                    self.pending_skills.remove(i);
+                }
             }
         }
     }
@@ -2012,6 +2077,96 @@ mod tests {
         let before = -r.target_speed_skills_active[0].duration_timer.t;
         r.process_skill_activations(&overtaking(), 2400.0);
         assert!((-r.target_speed_skills_active[0].duration_timer.t - before).abs() < 1e-9);
+    }
+
+    #[test]
+    fn cooldown_rearms_at_a_later_trigger_after_base_times_distance() {
+        // Mechanics doc § Skill Cooldown: Cooldown = BaseCooldown x
+        // CourseDistance / 1000. 30 s base at 2400 m -> 72 s.
+        let mut skill = target_speed_skill("200331", SkillRarity::White, "phase>=2");
+        skill.alternatives[0].cooldown_time = Some(300000.0);
+        let mut r = runner_with_skills(vec![skill]);
+        prepare(&mut r);
+        assert!((r.pending_skills[0].cooldown - 72.0).abs() < 1e-9);
+        // Two placed triggers, 20 m apart, as all_corner_random places them.
+        let start = r.pending_skills[0].trigger.start;
+        r.pending_skills[0].trigger = Region::new(start, start + 10.0);
+        r.pending_skills[0].later_triggers = vec![Region::new(start + 20.0, start + 30.0)];
+        r.wit_checks_enabled = false;
+        r.position = start + 5.0;
+        r.process_skill_activations(&FieldView::at_gate(), 2400.0);
+        assert_eq!(r.skills_activated_count, 1);
+        assert!(
+            r.pending_skills[0].wit_passed,
+            "stays armed, wit check spent"
+        );
+
+        // The next trigger arrives inside the cooldown: no activation, and the
+        // skill is done once that window passes.
+        r.position = start + 12.0;
+        r.process_skill_activations(&FieldView::at_gate(), 2400.0);
+        r.position = start + 25.0;
+        r.accumulate_time.advance(10.0);
+        r.process_skill_activations(&FieldView::at_gate(), 2400.0);
+        assert_eq!(r.skills_activated_count, 1, "inside the cooldown");
+
+        // Same again with the cooldown elapsed: it fires, without a new wit
+        // roll (checks on).
+        let mut skill = target_speed_skill("200331", SkillRarity::White, "phase>=2");
+        skill.alternatives[0].cooldown_time = Some(300000.0);
+        let mut r = runner_with_skills(vec![skill]);
+        prepare(&mut r);
+        let start = r.pending_skills[0].trigger.start;
+        r.pending_skills[0].trigger = Region::new(start, start + 10.0);
+        r.pending_skills[0].later_triggers = vec![Region::new(start + 20.0, start + 30.0)];
+        r.wit_checks_enabled = false;
+        r.position = start + 5.0;
+        r.process_skill_activations(&FieldView::at_gate(), 2400.0);
+        r.wit_checks_enabled = true;
+        r.position = start + 12.0;
+        r.process_skill_activations(&FieldView::at_gate(), 2400.0);
+        r.accumulate_time.advance(73.0);
+        r.position = start + 25.0;
+        r.process_skill_activations(&FieldView::at_gate(), 2400.0);
+        assert_eq!(r.skills_activated_count, 2, "after the cooldown");
+    }
+
+    #[test]
+    fn a_single_window_skill_fires_once_even_with_a_cooldown() {
+        // Held deviation (see process_skill_activations): single-window skills
+        // are not re-armed.
+        let mut skill = target_speed_skill("201662", SkillRarity::White, "phase>=2");
+        skill.alternatives[0].cooldown_time = Some(300000.0);
+        let mut r = runner_with_skills(vec![skill]);
+        prepare(&mut r);
+        r.wit_checks_enabled = false;
+        activate_first(&mut r, &FieldView::at_gate());
+        assert_eq!(r.skills_activated_count, 1);
+        assert!(r.pending_skills.is_empty());
+    }
+
+    #[test]
+    fn a_passed_window_moves_on_to_the_next_placed_trigger() {
+        let mut skill = target_speed_skill("200331", SkillRarity::White, "phase>=2");
+        skill.alternatives[0].cooldown_time = Some(300000.0);
+        let mut r = runner_with_skills(vec![skill]);
+        prepare(&mut r);
+        r.wit_checks_enabled = false;
+        r.pending_skills[0].trigger = Region::new(100.0, 110.0);
+        r.pending_skills[0].later_triggers = vec![Region::new(900.0, 910.0)];
+        r.position = 105.0;
+        r.process_skill_activations(&FieldView::at_gate(), 2400.0);
+        assert_eq!(r.skills_activated_count, 1);
+        r.position = 500.0; // past the first window
+        r.process_skill_activations(&FieldView::at_gate(), 2400.0);
+        assert_eq!(r.pending_skills[0].trigger, Region::new(900.0, 910.0));
+        r.accumulate_time.advance(80.0);
+        r.position = 905.0;
+        r.process_skill_activations(&FieldView::at_gate(), 2400.0);
+        assert_eq!(r.skills_activated_count, 2);
+        r.position = 950.0; // past the last window: done
+        r.process_skill_activations(&FieldView::at_gate(), 2400.0);
+        assert!(r.pending_skills.is_empty());
     }
 
     #[test]

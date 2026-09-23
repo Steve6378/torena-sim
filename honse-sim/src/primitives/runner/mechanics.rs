@@ -873,6 +873,10 @@ mod tests {
             extra_condition: None,
             target_strategy: None,
             duration_scaling: None,
+            cooldown: 0.0,
+            later_triggers: Vec::new(),
+            ready_at: f64::NEG_INFINITY,
+            wit_passed: false,
             forced: false,
         });
 
