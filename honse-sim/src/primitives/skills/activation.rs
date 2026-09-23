@@ -140,6 +140,36 @@ impl ActivationSamplePolicy {
         }
     }
 
+    /// Like [`Self::sample`], but each sample is the full, position-ordered list
+    /// of trigger windows it places: all of them for `AllCornerRandom` (mechanics
+    /// doc § all_corner_random: up to 4 triggers, "the condition is fulfilled if
+    /// uma is within one of the triggers"), one for every other policy. Draws
+    /// exactly the RNG `sample` draws.
+    pub fn sample_sets(
+        &self,
+        regions: &RegionList,
+        nsamples: usize,
+        rng: &mut dyn Prng,
+    ) -> Vec<Vec<Region>> {
+        match self {
+            ActivationSamplePolicy::AllCornerRandom => (0..nsamples)
+                .map(|_| {
+                    let placed = Self::place_all_triggers(regions, rng);
+                    if placed.is_empty() {
+                        vec![Region::INVALID]
+                    } else {
+                        placed
+                    }
+                })
+                .collect(),
+            _ => self
+                .sample(regions, nsamples, rng)
+                .into_iter()
+                .map(|r| vec![r])
+                .collect(),
+        }
+    }
+
     /// Length-weighted point sampling (`RandomPolicy` / `CornerRandomPolicy`).
     fn sample_weighted(regions: &RegionList, nsamples: usize, rng: &mut dyn Prng) -> Vec<Region> {
         if regions.0.is_empty() {
@@ -190,12 +220,21 @@ impl ActivationSamplePolicy {
     /// (`AllCornerRandomPolicy::placeTriggers`). Returns [`Region::INVALID`] when
     /// no trigger could be placed.
     fn place_triggers(regions: &RegionList, rng: &mut dyn Prng) -> Region {
+        Self::place_all_triggers(regions, rng)
+            .first()
+            .copied()
+            .unwrap_or(Region::INVALID)
+    }
+
+    /// Every trigger `place_triggers` places, in placement order, which is
+    /// increasing position: each draw is taken from the chosen corner's
+    /// remainder or a later corner.
+    fn place_all_triggers(regions: &RegionList, rng: &mut dyn Prng) -> Vec<Region> {
         let mut candidates = regions.0.clone();
         candidates.sort_by(|a, b| a.start.total_cmp(&b.start));
 
-        let mut first_trigger: Option<f64> = None;
-        let mut placed = 0;
-        while placed < 4 && !candidates.is_empty() {
+        let mut triggers: Vec<Region> = Vec::new();
+        while triggers.len() < 4 && !candidates.is_empty() {
             let idx = rng.uniform(candidates.len() as u32) as usize;
             let candidate = candidates[idx];
             let span = (candidate.len() - 10.0).max(0.0);
@@ -209,16 +248,9 @@ impl ActivationSamplePolicy {
             // Everything before this corner is guaranteed earlier in distance.
             candidates.drain(0..idx);
 
-            if first_trigger.is_none() {
-                first_trigger = Some(start);
-            }
-            placed += 1;
+            triggers.push(Region::new(start, start + 10.0));
         }
-
-        match first_trigger {
-            Some(start) => Region::new(start, start + 10.0),
-            None => Region::INVALID,
-        }
+        triggers
     }
 
     /// Shared distribution-random sampling (`DistributionRandomPolicy::sample`).
@@ -457,5 +489,31 @@ mod tests {
             P::AllCornerRandom.reconcile(P::StraightRandom),
             Err(ReconcileError::StraightVsAllCorner)
         );
+    }
+
+    #[test]
+    fn all_corner_sample_sets_keep_every_trigger_and_draw_the_same_rng() {
+        // Doc § all_corner_random: up to 4 triggers, position-ordered. The first
+        // of each set is exactly what `sample` returns from the same RNG state.
+        let corners = RegionList::from_vec(vec![
+            Region::new(200.0, 500.0),
+            Region::new(900.0, 1200.0),
+            Region::new(1600.0, 1900.0),
+        ]);
+        for seed in 0..50u64 {
+            let mut a = Xoshiro256StarStar::from_u64_seed(seed);
+            let mut b = Xoshiro256StarStar::from_u64_seed(seed);
+            let sets = ActivationSamplePolicy::AllCornerRandom.sample_sets(&corners, 3, &mut a);
+            let firsts = ActivationSamplePolicy::AllCornerRandom.sample(&corners, 3, &mut b);
+            assert_eq!(sets.iter().map(|s| s[0]).collect::<Vec<_>>(), firsts);
+            for set in &sets {
+                assert!(!set.is_empty() && set.len() <= 4);
+                for w in set.windows(2) {
+                    assert!(w[0].end <= w[1].start, "ordered, non-overlapping");
+                }
+            }
+            // Both RNGs end in the same state.
+            assert_eq!(a.uniform(1_000_000), b.uniform(1_000_000));
+        }
     }
 }

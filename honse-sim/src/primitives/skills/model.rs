@@ -289,6 +289,8 @@ pub struct SkillTrigger {
     /// The alternative's duration scaling code (see
     /// [`SkillAlternative::duration_scaling`]).
     pub duration_scaling: Option<i32>,
+    /// The alternative's base cooldown (raw x10000 seconds), if any.
+    pub cooldown_time: Option<f64>,
 }
 
 /// Duration multiplier for a skill's `ability_time_usage` code, resolved at
@@ -393,6 +395,18 @@ pub struct PendingSkill {
     /// The alternative's duration scaling code (see
     /// [`SkillAlternative::duration_scaling`]).
     pub duration_scaling: Option<i32>,
+    /// Real cooldown in seconds (mechanics doc § Skill Cooldown: base x course
+    /// distance / 1000); 0 = the skill activates at most once.
+    pub cooldown: f64,
+    /// Later trigger windows, position-ordered (all_corner_random places up
+    /// to 4); the skill moves to the next when it passes the current one.
+    pub later_triggers: Vec<Region>,
+    /// Race time before which a cooled-down skill cannot activate again
+    /// (`NEG_INFINITY` until its first activation: the race clock starts at
+    /// -1 s, before the gate).
+    pub ready_at: f64,
+    /// Whether this skill's once-per-race wit check has already passed.
+    pub wit_passed: bool,
     /// User-forced activation (scripted `forcedPositions`): the skill fires
     /// unconditionally when the runner reaches its trigger window — dynamic
     /// condition gates and the wit check are bypassed, matching injected-debuff
