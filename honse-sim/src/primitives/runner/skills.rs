@@ -900,6 +900,14 @@ impl Runner {
                     self.activated_advantage_effect_types |= 1u64 << t;
                 }
             }
+            // ActivateRandomGold fires other skills here, where the course
+            // distance is known: through apply_self_effect it was handed this
+            // effect's own duration in the distance's place, so every gold it
+            // forced ran for base x duration / 1000 -- about one tick.
+            if resolved.effect_type == SkillType::ActivateRandomGold {
+                self.activate_random_gold_skill(resolved.modifier as usize, course_distance);
+                continue;
+            }
             self.apply_self_effect(skill, &resolved, scaled_duration);
         }
         if skill.duration_scaling == Some(4) && skill_duration > 0.0 {
@@ -989,9 +997,8 @@ impl Runner {
                     self.force_last_spurt_check();
                 }
             }
-            SkillType::ActivateRandomGold => {
-                self.activate_random_gold_skill(effect.modifier as usize, duration);
-            }
+            // Handled in activate_skill, which has the course distance.
+            SkillType::ActivateRandomGold => {}
             SkillType::ExtendEvolvedDuration => {
                 self.modifiers.special_skill_duration_scaling = effect.modifier;
             }
@@ -1003,13 +1010,17 @@ impl Runner {
     }
 
     fn activate_random_gold_skill(&mut self, count: usize, course_distance: f64) {
+        // A skill still cooling down after firing (kept pending for a later
+        // trigger, patch 0019) is not a candidate: it has already activated.
+        let now = self.accumulate_time.t;
         let mut gold_indices: Vec<usize> = self
             .pending_skills
             .iter()
             .enumerate()
             .filter(|(_, skill)| {
                 let gold = matches!(skill.rarity, SkillRarity::Gold | SkillRarity::Evolution);
-                gold && skill.effects.iter().all(|e| (e.effect_type as i32) > 5)
+                gold && now >= skill.ready_at
+                    && skill.effects.iter().all(|e| (e.effect_type as i32) > 5)
             })
             .map(|(idx, _)| idx)
             .collect();
@@ -2021,6 +2032,91 @@ mod tests {
 
     /// Prepare `skills`, then place the runner inside the first pending
     /// trigger and run one activation pass with `field`.
+    /// Put the runner inside the 110071 carrier's window, ahead of the gold's
+    /// own (phase 2), and run one activation pass.
+    fn fire_carrier(r: &mut Runner) {
+        let carrier = r
+            .pending_skills
+            .iter()
+            .find(|p| p.skill_id.as_str() == "110071")
+            .expect("carrier pending")
+            .trigger;
+        let gold = r
+            .pending_skills
+            .iter()
+            .find(|p| p.skill_id.as_str() == "200002")
+            .expect("gold pending")
+            .trigger;
+        r.position = carrier.start + 0.5;
+        assert!(r.position < gold.start, "the gold's own window is later");
+        r.process_skill_activations(&FieldView::at_gate(), 2400.0);
+    }
+
+    #[test]
+    fn a_forced_gold_runs_its_full_duration() {
+        // Sirius Symboli's unique shape (110071): a target-speed effect plus
+        // ActivateRandomGold, here forcing one gold. Rarity White so the
+        // carrier is neither dropped as another outfit's unique nor a gold
+        // candidate itself. The gold must run base x
+        // course distance / 1000 (3 s x 2.4), not base x the carrier's own
+        // duration / 1000.
+        let mut carrier = target_speed_skill("110071", SkillRarity::White, "phase==1");
+        carrier.alternatives[0].effects.push(RawSkillEffect {
+            modifier: 10000.0,
+            target: SkillTarget::SelfTarget,
+            effect_type: 37, // ActivateRandomGold
+            value_usage: None,
+            value_level_usage: None,
+            pre_applied_multiplier: None,
+            additional_activate_type: None,
+        });
+        let gold = target_speed_skill("200002", SkillRarity::Gold, "phase>=2");
+        let mut r = runner_with_skills(vec![carrier, gold]);
+        prepare(&mut r);
+        r.wit_checks_enabled = false;
+        fire_carrier(&mut r);
+        let forced = r
+            .target_speed_skills_active
+            .iter()
+            .find(|a| a.skill_id.as_str() == "200002")
+            .expect("the gold was forced");
+        assert!(
+            (-forced.duration_timer.t - 3.0 * 2.4).abs() < 1e-9,
+            "{}",
+            -forced.duration_timer.t
+        );
+    }
+
+    #[test]
+    fn a_gold_cooling_down_is_not_forced_again() {
+        let mut carrier = target_speed_skill("110071", SkillRarity::White, "phase==1");
+        carrier.alternatives[0].effects.push(RawSkillEffect {
+            modifier: 10000.0,
+            target: SkillTarget::SelfTarget,
+            effect_type: 37,
+            value_usage: None,
+            value_level_usage: None,
+            pre_applied_multiplier: None,
+            additional_activate_type: None,
+        });
+        let gold = target_speed_skill("200002", SkillRarity::Gold, "phase>=2");
+        let mut r = runner_with_skills(vec![carrier, gold]);
+        prepare(&mut r);
+        r.wit_checks_enabled = false;
+        // The gold has fired and waits out its cooldown (patch 0019 keeps it).
+        let at = r
+            .pending_skills
+            .iter()
+            .position(|p| p.skill_id.as_str() == "200002")
+            .expect("gold pending");
+        r.pending_skills[at].ready_at = r.accumulate_time.t + 60.0;
+        fire_carrier(&mut r);
+        assert!(r
+            .target_speed_skills_active
+            .iter()
+            .all(|a| a.skill_id.as_str() != "200002"));
+    }
+
     fn activate_first(r: &mut Runner, field: &FieldView) {
         let trigger = r.pending_skills[0].trigger;
         r.position = trigger.start + 0.5;
