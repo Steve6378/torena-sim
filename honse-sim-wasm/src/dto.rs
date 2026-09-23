@@ -439,6 +439,10 @@ pub struct WasmRawEffect {
     /// `missingPreAppliedMultiplier`.
     #[serde(default)]
     pub pre_applied_multiplier: Option<f64>,
+    /// Additional activation trigger (`additional_activate_type`); `None` =
+    /// applied at activation.
+    #[serde(default)]
+    pub additional_activate_type: Option<i32>,
 }
 
 impl WasmRawEffect {
@@ -451,6 +455,7 @@ impl WasmRawEffect {
             value_usage: self.value_usage,
             value_level_usage: self.value_level_usage,
             pre_applied_multiplier: self.pre_applied_multiplier,
+            additional_activate_type: self.additional_activate_type,
         })
     }
 }

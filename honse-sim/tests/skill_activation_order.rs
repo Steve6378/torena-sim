@@ -85,6 +85,7 @@ fn skill(id: &str) -> Skill {
                 value_usage: None,
                 value_level_usage: None,
                 pre_applied_multiplier: None,
+                additional_activate_type: None,
             }],
         }],
     }

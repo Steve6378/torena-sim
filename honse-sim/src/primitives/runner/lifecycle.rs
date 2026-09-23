@@ -332,6 +332,8 @@ impl Runner {
             emitted_debuffs: Vec::new(),
             pending_skills: Vec::new(),
             activation_distance_from_top: 0.0,
+            held_additional_effects: Vec::new(),
+            order_up_extensions: Vec::new(),
             pending_targeted_skills: Vec::new(),
             pending_skill_removal: std::collections::HashSet::new(),
             course_distance: course.distance,

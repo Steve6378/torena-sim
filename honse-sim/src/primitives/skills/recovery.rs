@@ -55,6 +55,7 @@ mod tests {
             base_duration: 0.0,
             modifier,
             value_scaling,
+            additional_activate_type: None,
             value_level_usage: None,
         }
     }
