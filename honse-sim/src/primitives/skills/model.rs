@@ -61,6 +61,11 @@ pub struct SkillAlternative {
     /// Optional cooldown between activations (raw units).
     #[serde(default)]
     pub cooldown_time: Option<f64>,
+    /// Duration scaling code (`ability_time_usage`; mechanics doc § Duration
+    /// Scaling). `None` or 1 = Direct. 2 = distance behind the leader, 3 and 7
+    /// = remaining HP tables, applied at activation. Other codes run unscaled.
+    #[serde(default)]
+    pub duration_scaling: Option<i32>,
     /// The activation condition DSL string.
     pub condition: String,
     /// Optional precondition DSL string.
@@ -269,6 +274,45 @@ pub struct SkillTrigger {
     /// (`running_style_count_<style>_otherself`), since the effect data does not
     /// carry it. `None` for skills whose targeting needs no strategy.
     pub target_strategy: Option<Strategy>,
+    /// The alternative's duration scaling code (see
+    /// [`SkillAlternative::duration_scaling`]).
+    pub duration_scaling: Option<i32>,
+}
+
+/// Duration multiplier for a skill's `ability_time_usage` code, resolved at
+/// activation (mechanics doc § Duration Scaling, Ability Time Usage):
+///
+/// - 2 MultiplyDistanceDiffTop: `min(0.8 + distance_from_top / 62.5, 1.6)`,
+///   metres behind the leader.
+/// - 3 MultiplyRemainHp type 1: remaining HP (absolute) < 2000 1.0x, < 2400
+///   1.5x, < 2600 2.0x, < 2800 2.2x, < 3000 2.5x, < 3200 3.0x, < 3500 3.5x,
+///   else 4.0x.
+/// - 7 MultiplyRemainHp type 2: < 1500 1.0x, < 1800 1.5x, < 2000 2.0x,
+///   < 2100 2.5x, else 3.0x.
+///
+/// Every other code is 1.0: `None`/1 is Direct; 4 (IncrementOrderUp) extends
+/// the duration after activation rather than scaling it; 5 and 6 (blocked
+/// time) are not modeled.
+pub fn duration_scaling_multiplier(code: Option<i32>, hp: f64, distance_from_top: f64) -> f64 {
+    fn band(value: f64, cuts: &[f64], tiers: &[f64]) -> f64 {
+        cuts.iter()
+            .position(|cut| value < *cut)
+            .map_or(tiers[cuts.len()], |i| tiers[i])
+    }
+    match code {
+        Some(2) => (0.8 + distance_from_top.max(0.0) / 62.5).min(1.6),
+        Some(3) => band(
+            hp,
+            &[2000.0, 2400.0, 2600.0, 2800.0, 3000.0, 3200.0, 3500.0],
+            &[1.0, 1.5, 2.0, 2.2, 2.5, 3.0, 3.5, 4.0],
+        ),
+        Some(7) => band(
+            hp,
+            &[1500.0, 1800.0, 2000.0, 2100.0],
+            &[1.0, 1.5, 2.0, 2.5, 3.0],
+        ),
+        _ => 1.0,
+    }
 }
 
 /// A skill whose trigger point has been fixed, awaiting the runner reaching it.
@@ -292,6 +336,9 @@ pub struct PendingSkill {
     /// Derived target running style for `EnemyStrategy` external debuffs (see
     /// [`SkillTrigger::target_strategy`]).
     pub target_strategy: Option<Strategy>,
+    /// The alternative's duration scaling code (see
+    /// [`SkillAlternative::duration_scaling`]).
+    pub duration_scaling: Option<i32>,
     /// User-forced activation (scripted `forcedPositions`): the skill fires
     /// unconditionally when the runner reaches its trigger window — dynamic
     /// condition gates and the wit check are bypassed, matching injected-debuff
@@ -367,10 +414,34 @@ mod tests {
     use super::*;
 
     #[test]
+    fn duration_scaling_remaining_hp_tables_match_the_doc() {
+        let f = |code, hp| duration_scaling_multiplier(Some(code), hp, 0.0);
+        // Type 1 (3): boundaries are inclusive on the upper tier.
+        let hp3 = [
+            1999.0, 2000.0, 2399.0, 2400.0, 2600.0, 2800.0, 3000.0, 3200.0, 3499.0, 3500.0,
+        ];
+        let want3 = [1.0, 1.5, 1.5, 2.0, 2.2, 2.5, 3.0, 3.5, 3.5, 4.0];
+        for (hp, want) in hp3.iter().zip(want3) {
+            assert_eq!(f(3, *hp), want, "code 3 at {hp}");
+        }
+        // Type 2 (7).
+        let hp7 = [1499.0, 1500.0, 1800.0, 2000.0, 2099.0, 2100.0];
+        let want7 = [1.0, 1.5, 2.0, 2.5, 2.5, 3.0];
+        for (hp, want) in hp7.iter().zip(want7) {
+            assert_eq!(f(7, *hp), want, "code 7 at {hp}");
+        }
+        // Direct, absent and not-applied codes are 1.0 whatever the HP.
+        for code in [None, Some(1), Some(4), Some(5), Some(6)] {
+            assert_eq!(duration_scaling_multiplier(code, 4000.0, 100.0), 1.0);
+        }
+    }
+
+    #[test]
     fn build_skill_effects_scales_by_10000() {
         let alt = SkillAlternative {
             base_duration: 30000.0,
             cooldown_time: None,
+            duration_scaling: None,
             condition: "phase>=2".to_owned(),
             precondition: None,
             effects: vec![
@@ -411,6 +482,7 @@ mod tests {
         let alt = SkillAlternative {
             base_duration: -10000.0,
             cooldown_time: None,
+            duration_scaling: None,
             condition: "running_style==2".to_owned(),
             precondition: None,
             effects: vec![
@@ -448,6 +520,7 @@ mod tests {
         let alt = SkillAlternative {
             base_duration: 50000.0,
             cooldown_time: None,
+            duration_scaling: None,
             condition: "phase>=2".to_owned(),
             precondition: None,
             effects: vec![
@@ -506,6 +579,7 @@ mod tests {
         let alt = SkillAlternative {
             base_duration: 30000.0,
             cooldown_time: None,
+            duration_scaling: None,
             condition: "phase>=2".to_owned(),
             precondition: None,
             effects: vec![RawSkillEffect {
@@ -525,6 +599,7 @@ mod tests {
         let alt = SkillAlternative {
             base_duration: 0.0,
             cooldown_time: None,
+            duration_scaling: None,
             condition: String::new(),
             precondition: None,
             effects: vec![RawSkillEffect {
@@ -552,6 +627,7 @@ mod tests {
             alternatives: vec![SkillAlternative {
                 base_duration: 12000.0,
                 cooldown_time: Some(2000.0),
+                duration_scaling: None,
                 condition: "phase>=1".to_owned(),
                 precondition: None,
                 effects: vec![RawSkillEffect {

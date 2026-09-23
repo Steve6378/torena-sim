@@ -1218,6 +1218,7 @@ mod tests {
             alternatives: vec![SkillAlternative {
                 base_duration: 30000.0,
                 cooldown_time: None,
+                duration_scaling: None,
                 condition: "running_style_count_nige_otherself>=1&phase_random==2".to_owned(),
                 precondition: None,
                 effects: vec![RawSkillEffect {

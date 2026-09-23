@@ -28,9 +28,9 @@ use crate::skills::condition::{ApplyParams, ConditionResolution, SkillEvalRunner
 use crate::skills::debuff::{get_external_debuff_effects, is_emittable_external_effect};
 use crate::skills::effect::{SkillRarity, SkillType};
 use crate::skills::model::{
-    build_skill_effects, ActiveSkill, ActiveTargetedSkill, EmittedDebuff, PendingSkill,
-    PendingTargetedSkill, ResolvedSkillEffect, Skill, SkillEffectSpec, SkillTrigger,
-    TargetedSkillOrigin,
+    build_skill_effects, duration_scaling_multiplier, ActiveSkill, ActiveTargetedSkill,
+    EmittedDebuff, PendingSkill, PendingTargetedSkill, ResolvedSkillEffect, Skill, SkillEffectSpec,
+    SkillTrigger, TargetedSkillOrigin,
 };
 use crate::skills::recovery::resolve_effect_modifier;
 
@@ -276,6 +276,7 @@ pub fn build_skill_data(params: &BuildSkillDataParams<'_>) -> Vec<SkillTrigger> 
                 effects,
                 extra_condition,
                 target_strategy: derive_target_strategy(&alt.condition),
+                duration_scaling: alt.duration_scaling,
             });
         }
     }
@@ -304,6 +305,7 @@ pub fn build_skill_data(params: &BuildSkillDataParams<'_>) -> Vec<SkillTrigger> 
         effects,
         extra_condition: Some(DynamicCondition::new(|_| false)),
         target_strategy: None,
+        duration_scaling: first.duration_scaling,
     }]
 }
 
@@ -417,6 +419,7 @@ impl Runner {
                         trigger.extra_condition
                     },
                     target_strategy: trigger.target_strategy,
+                    duration_scaling: trigger.duration_scaling,
                     forced,
                 });
             }
@@ -448,6 +451,7 @@ impl Runner {
                     effects,
                     extra_condition: None,
                     target_strategy: derive_target_strategy(&alt.condition),
+                    duration_scaling: alt.duration_scaling,
                     forced: true,
                 });
                 break;
@@ -534,6 +538,9 @@ impl Runner {
     /// Process self-skill activations for this tick.
     pub(crate) fn process_skill_activations(&mut self, field: &FieldView, course_distance: f64) {
         self.cleanup_expired_self_skills();
+        self.activation_distance_from_top = field
+            .leader_position
+            .map_or(0.0, |leader| (leader - self.position).max(0.0));
 
         let mut i = self.pending_skills.len();
         while i > 0 {
@@ -692,7 +699,13 @@ impl Runner {
             } else {
                 1.0
             };
-            let scaled_duration = resolved.base_duration * (course_distance / 1000.0) * scaling;
+            let time_scaling = duration_scaling_multiplier(
+                skill.duration_scaling,
+                self.health_policy.current_health(),
+                self.activation_distance_from_top,
+            );
+            let scaled_duration =
+                resolved.base_duration * (course_distance / 1000.0) * scaling * time_scaling;
             self.apply_self_effect(skill, &resolved, scaled_duration);
         }
 
@@ -1108,6 +1121,7 @@ mod tests {
             alternatives: vec![SkillAlternative {
                 base_duration: 30000.0,
                 cooldown_time: None,
+                duration_scaling: None,
                 condition: condition.to_owned(),
                 precondition: None,
                 effects: vec![RawSkillEffect {
@@ -1131,6 +1145,7 @@ mod tests {
             alternatives: vec![SkillAlternative {
                 base_duration: -10000.0,
                 cooldown_time: None,
+                duration_scaling: None,
                 condition: "running_style==2".to_owned(),
                 precondition: None,
                 effects: vec![
@@ -1163,6 +1178,7 @@ mod tests {
             alternatives: vec![SkillAlternative {
                 base_duration: -1.0,
                 cooldown_time: Some(0.0),
+                duration_scaling: None,
                 condition: condition.to_owned(),
                 precondition: Some(String::new()),
                 effects: vec![RawSkillEffect {
@@ -1323,6 +1339,7 @@ mod tests {
             alternatives: vec![SkillAlternative {
                 base_duration: -10000.0,
                 cooldown_time: Some(0.0),
+                duration_scaling: None,
                 condition: cond.to_owned(),
                 precondition: Some(String::new()),
                 effects: vec![RawSkillEffect {
@@ -1345,6 +1362,7 @@ mod tests {
                 alternatives: vec![SkillAlternative {
                     base_duration: 50000.0,
                     cooldown_time: None,
+                    duration_scaling: None,
                     condition: "phase_laterhalf_random==1".to_owned(),
                     precondition: Some(String::new()),
                     effects: vec![
@@ -1383,6 +1401,7 @@ mod tests {
                 alternatives: vec![SkillAlternative {
                     base_duration: -10000.0,
                     cooldown_time: Some(0.0),
+                    duration_scaling: None,
                     condition: "running_style==2".to_owned(),
                     precondition: Some(String::new()),
                     effects: vec![
@@ -1427,6 +1446,7 @@ mod tests {
             alternatives: vec![SkillAlternative {
                 base_duration: -10000.0,
                 cooldown_time: Some(0.0),
+                duration_scaling: None,
                 condition: cond.to_owned(),
                 precondition: Some(String::new()),
                 effects: vec![RawSkillEffect {
@@ -1658,6 +1678,7 @@ mod tests {
             alternatives: vec![SkillAlternative {
                 base_duration: 30000.0,
                 cooldown_time: None,
+                duration_scaling: None,
                 condition: "phase>=0".to_owned(),
                 precondition: None,
                 effects: vec![RawSkillEffect {
@@ -1725,6 +1746,39 @@ mod tests {
         assert_eq!(r.skills_activated_count, 1);
         assert!(r.used_skills.contains("100001"));
         assert!(r.pending_skills.is_empty());
+    }
+
+    /// Activation duration (seconds) of a target-speed skill carrying
+    /// `duration_scaling`, activated with the leader `ahead` metres in front.
+    fn activated_duration(duration_scaling: Option<i32>, ahead: f64) -> f64 {
+        let mut skill = target_speed_skill("100001", SkillRarity::Gold, "phase>=2");
+        skill.alternatives[0].duration_scaling = duration_scaling;
+        let mut r = runner_with_skills(vec![skill]);
+        prepare(&mut r);
+        r.wit_checks_enabled = false;
+        let trigger = r.pending_skills[0].trigger;
+        r.position = trigger.start + 0.5;
+        let field = FieldView {
+            leader_position: Some(r.position + ahead),
+            ..FieldView::default()
+        };
+        r.process_skill_activations(&field, 2400.0);
+        assert_eq!(r.target_speed_skills_active.len(), 1);
+        -r.target_speed_skills_active[0].duration_timer.t
+    }
+
+    #[test]
+    fn duration_scaling_2_stretches_by_distance_behind_the_leader() {
+        // Mechanics doc: ScaledDuration = BaseDuration * min(0.8 + DistanceFromTop
+        // / 62.5m, 1.6). 50 m behind -> 1.6x; 12.5 m -> 1.0x; leading -> 0.8x.
+        let direct = activated_duration(None, 50.0);
+        assert!((activated_duration(Some(2), 50.0) / direct - 1.6).abs() < 1e-9);
+        assert!((activated_duration(Some(2), 12.5) / direct - 1.0).abs() < 1e-9);
+        assert!((activated_duration(Some(2), 0.0) / direct - 0.8).abs() < 1e-9);
+        assert!((activated_duration(Some(2), 500.0) / direct - 1.6).abs() < 1e-9);
+        // Direct (1) and unmodeled codes do not scale.
+        assert!((activated_duration(Some(1), 50.0) - direct).abs() < 1e-9);
+        assert!((activated_duration(Some(5), 50.0) - direct).abs() < 1e-9);
     }
 
     #[test]
@@ -1850,6 +1904,7 @@ mod tests {
             alternatives: vec![SkillAlternative {
                 base_duration: 18000.0,
                 cooldown_time: None,
+                duration_scaling: None,
                 condition: "phase>=2".to_owned(),
                 precondition: None,
                 effects: vec![
@@ -1905,6 +1960,7 @@ mod tests {
             alternatives: vec![SkillAlternative {
                 base_duration: 0.0,
                 cooldown_time: None,
+                duration_scaling: None,
                 condition: "phase>=2".to_owned(),
                 precondition: None,
                 effects: vec![RawSkillEffect {

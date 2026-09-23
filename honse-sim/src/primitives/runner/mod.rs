@@ -471,6 +471,9 @@ pub struct Runner {
     pub emitted_debuffs: Vec<crate::skills::model::EmittedDebuff>,
     /// Pending self-skills awaiting their trigger.
     pub pending_skills: Vec<PendingSkill>,
+    /// Metres behind the leader when the current activation pass began (0 at
+    /// the gate or when leading). Read by duration scaling code 2.
+    pub activation_distance_from_top: f64,
     /// Pending targeted skills awaiting their trigger.
     pub pending_targeted_skills: Vec<PendingTargetedSkill>,
     /// Skill ids flagged for removal next activation pass.

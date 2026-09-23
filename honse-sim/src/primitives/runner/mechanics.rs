@@ -870,6 +870,7 @@ mod tests {
             ],
             extra_condition: None,
             target_strategy: None,
+            duration_scaling: None,
             forced: false,
         });
 
