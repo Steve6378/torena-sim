@@ -29,12 +29,12 @@ fn count_active_rushed(
         .count() as i64
 }
 
-fn count_active_dueling(runner: &dyn RunnerView) -> i64 {
+fn own_showdown_count(runner: &dyn RunnerView) -> i64 {
     runner
         .active_runners()
         .iter()
-        .filter(|other| other.is_dueling)
-        .count() as i64
+        .find(|other| other.is_self)
+        .map_or(0, |me| i64::from(me.is_dueling || me.has_dueled))
 }
 
 fn has_same_style_as_popularity_one(runner: &dyn RunnerView) -> bool {
@@ -226,8 +226,14 @@ pub fn register_state_conditions() {
         })
     });
 
+    // GameTora: "The number of times you've been in a Showdown." The observing
+    // runner's own count, not the field's: the engine runs one duel per
+    // runner per race, so it is 1 from the moment her duel starts, else 0.
+    // (Reading the field's live duels instead let the Showdown-gated uniques
+    // fire off anyone's duel: Now We're Cruisin'! 96% in the engine against
+    // 32% on the 117 recordings.)
     register_dynamic_condition("compete_fight_count", |arg, cmp| {
-        DynamicCondition::new(move |r| compare(count_active_dueling(r) as f64, arg as f64, cmp))
+        DynamicCondition::new(move |r| compare(own_showdown_count(r) as f64, arg as f64, cmp))
     });
 }
 
@@ -284,6 +290,7 @@ mod tests {
             gate,
             is_rushed: rushed,
             is_dueling: false,
+            has_dueled: false,
             activated_advantage_effect_types: 0,
         }
     }
@@ -317,6 +324,36 @@ mod tests {
             ..Default::default()
         };
         assert!(cond.eval(&runner)); // 2 rushed
+    }
+
+    #[test]
+    fn compete_fight_count_is_the_runners_own_showdown() {
+        register_state_conditions();
+        let factory = get_dynamic_condition("compete_fight_count").expect("registered");
+        let cond = factory(0, CmpKind::Gt);
+        let mut duel = rival(false, 90.0, Strategy::PaceChaser, 1, false);
+        duel.is_dueling = true;
+        // Someone else's duel does not count.
+        let watching = TestRunner {
+            runners: vec![rival(true, 100.0, Strategy::FrontRunner, 0, false), duel],
+            ..Default::default()
+        };
+        assert!(!cond.eval(&watching));
+        // Her own, while it runs and after it is over.
+        let mut me = rival(true, 100.0, Strategy::FrontRunner, 0, false);
+        me.is_dueling = true;
+        let in_it = TestRunner {
+            runners: vec![me, duel],
+            ..Default::default()
+        };
+        assert!(cond.eval(&in_it));
+        me.is_dueling = false;
+        me.has_dueled = true;
+        let after = TestRunner {
+            runners: vec![me],
+            ..Default::default()
+        };
+        assert!(cond.eval(&after));
     }
 
     #[test]

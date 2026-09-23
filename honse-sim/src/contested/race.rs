@@ -119,6 +119,9 @@ pub struct Race {
     runners: Vec<Runner>,
     /// Ids of finished runners, in finish order (append-only).
     finished_runners: Vec<RunnerId>,
+    /// Each finished runner's (race clock, position, speed) on the tick she
+    /// crossed the line, in finish order. See [`finished_leader_position`].
+    finish_marks: Vec<(f64, f64, f64)>,
 
     /// The static condition catalog (owns the parser's backing data).
     catalog: ConditionCatalog,
@@ -195,6 +198,7 @@ impl Race {
             race_params,
             runners: Vec::new(),
             finished_runners: Vec::new(),
+            finish_marks: Vec::new(),
             catalog: build_catalog(),
             whole_course,
             round_iteration: 0,
@@ -256,6 +260,7 @@ impl Race {
     pub fn prepare_round(&mut self, master_seed: u64) {
         self.accumulated_time = 0.0;
         self.finished_runners.clear();
+        self.finish_marks.clear();
         self.order_tracker.reset();
         self.spot_struggle_unlocked = false;
         self.spot_struggle_triggered.clear();
@@ -375,6 +380,13 @@ impl Race {
             &self.finished_runners,
             &mut self.order_tracker,
         );
+        if let Some(ahead) = finished_leader_position(&self.finish_marks, self.accumulated_time) {
+            snapshot.leader_position = Some(
+                snapshot
+                    .leader_position
+                    .map_or(ahead, |on_course| on_course.max(ahead)),
+            );
+        }
         update_condition_timers(
             &mut snapshot,
             &mut self.order_tracker,
@@ -895,6 +907,11 @@ impl Race {
         for id in newly_finished {
             self.finished_runners.push(id);
             if let Some(runner) = self.runners.iter().find(|r| r.id == id) {
+                self.finish_marks.push((
+                    self.accumulated_time,
+                    runner.position,
+                    runner.current_speed,
+                ));
                 observers.emit_runner_finished(self, runner);
             }
         }
@@ -954,6 +971,25 @@ fn resolve_field_inputs<'a>(
         position_keep,
         skill_triggers: SkillTriggerInputs { field },
     }
+}
+
+/// Where the race's leader is once she has crossed the line.
+///
+/// The game keeps finished runners running, and `distance_diff_top` (with
+/// `distance_diff_rate`) measures to that leader: on the 117 recordings,
+/// Pedal to the Metal (late, final straight, `distance_diff_top<=10`) fired
+/// for 29 of the 30 carriers whose gap to the true leader reached 10 m and for
+/// none of the 77 whose gap never did; measured to the front runner still on
+/// course, 104 carriers would have qualified. This engine stops simulating a
+/// runner at the line, so her position past it is extrapolated at her speed
+/// when she crossed: on the recordings a finisher is within 2.5% of that line
+/// for the first 4 s (she slows about 0.3 m/s per second), and every gap these
+/// conditions read closes well inside that.
+fn finished_leader_position(finish_marks: &[(f64, f64, f64)], now: f64) -> Option<f64> {
+    finish_marks
+        .iter()
+        .map(|&(at, position, speed)| position + speed * (now - at).max(0.0))
+        .reduce(f64::max)
 }
 
 #[cfg(test)]
@@ -1035,6 +1071,15 @@ mod tests {
             race.add_runner(props(&format!("R{i}"), s));
         }
         race
+    }
+
+    #[test]
+    fn a_finished_leader_keeps_running_for_distance_diff_top() {
+        assert_eq!(finished_leader_position(&[], 100.0), None);
+        // Crossed 2000 m at t=100 s doing 20 m/s: 30 m past the line at 101.5 s.
+        let marks = [(100.0, 2000.0, 20.0), (100.5, 2000.2, 22.0)];
+        let at = finished_leader_position(&marks, 101.5).expect("a runner has finished");
+        assert!((at - 2030.0).abs() < 1e-9, "{at}");
     }
 
     #[test]

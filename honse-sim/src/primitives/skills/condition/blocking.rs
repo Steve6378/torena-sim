@@ -230,6 +230,7 @@ mod tests {
                 gate: 0,
                 is_rushed: false,
                 is_dueling: false,
+                has_dueled: false,
                 activated_advantage_effect_types: 0,
             }]
         }

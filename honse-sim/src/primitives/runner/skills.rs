@@ -29,8 +29,9 @@ use crate::skills::debuff::{get_external_debuff_effects, is_emittable_external_e
 use crate::skills::effect::{SkillRarity, SkillType};
 use crate::skills::model::{
     build_skill_effects, duration_scaling_multiplier, ActiveSkill, ActiveTargetedSkill,
-    EmittedDebuff, HeldAdditionalEffect, OrderUpExtension, PendingSkill, PendingTargetedSkill,
-    ResolvedSkillEffect, Skill, SkillEffectSpec, SkillTrigger, TargetedSkillOrigin,
+    DynamicPrecondition, EmittedDebuff, HeldAdditionalEffect, OrderUpExtension, PendingSkill,
+    PendingTargetedSkill, ResolvedSkillEffect, Skill, SkillEffectSpec, SkillTrigger,
+    TargetedSkillOrigin,
 };
 use crate::skills::recovery::resolve_effect_modifier;
 
@@ -220,6 +221,7 @@ pub fn build_skill_data(params: &BuildSkillDataParams<'_>) -> Vec<SkillTrigger> 
         }
 
         let mut full = params.whole_course.clone();
+        let mut runtime_pre: Option<DynamicPrecondition> = None;
 
         // An empty precondition string means "no precondition" (TS treats it as
         // falsy in `if (skillAlternative.precondition)`). Skipping it is required
@@ -236,7 +238,7 @@ pub fn build_skill_data(params: &BuildSkillDataParams<'_>) -> Vec<SkillTrigger> 
                 extra: &extra,
                 resolution: params.resolution,
             };
-            let Ok((pre_regions, _)) = parsed_pre.apply(&pre_params) else {
+            let Ok((pre_regions, pre_check)) = parsed_pre.apply(&pre_params) else {
                 return Vec::new();
             };
             if pre_regions.0.is_empty() {
@@ -247,6 +249,11 @@ pub fn build_skill_data(params: &BuildSkillDataParams<'_>) -> Vec<SkillTrigger> 
             };
             let bounds = Region::new(pre_regions.0[0].start, last.end);
             full = full.rmap(|r| r.intersect(&bounds));
+            runtime_pre = pre_check.map(|check| DynamicPrecondition {
+                regions: pre_regions,
+                check,
+                met: false,
+            });
         }
 
         let Ok(parsed_op) = params.parser.parse(&alt.condition) else {
@@ -283,6 +290,7 @@ pub fn build_skill_data(params: &BuildSkillDataParams<'_>) -> Vec<SkillTrigger> 
                 target_strategy: derive_target_strategy(&alt.condition),
                 duration_scaling: alt.duration_scaling,
                 cooldown_time: alt.cooldown_time,
+                precondition: runtime_pre,
             });
         }
     }
@@ -313,6 +321,7 @@ pub fn build_skill_data(params: &BuildSkillDataParams<'_>) -> Vec<SkillTrigger> 
         target_strategy: None,
         duration_scaling: first.duration_scaling,
         cooldown_time: first.cooldown_time,
+        precondition: None,
     }]
 }
 
@@ -446,6 +455,7 @@ impl Runner {
                     ready_at: f64::NEG_INFINITY,
                     wit_passed: false,
                     forced,
+                    precondition: if forced { None } else { trigger.precondition },
                 });
             }
         }
@@ -482,6 +492,7 @@ impl Runner {
                     ready_at: f64::NEG_INFINITY,
                     wit_passed: false,
                     forced: true,
+                    precondition: None,
                 });
                 break;
             }
@@ -579,6 +590,29 @@ impl Runner {
             }
         }
 
+        // Latch preconditions: each is checked wherever its static part holds,
+        // whether or not the skill's own window has opened yet.
+        let view = RunnerConditionView {
+            runner: self,
+            field,
+        };
+        let latched: Vec<usize> = self
+            .pending_skills
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| {
+                s.precondition
+                    .as_ref()
+                    .is_some_and(|p| !p.met && p.covers(self.position) && p.check.eval(&view))
+            })
+            .map(|(at, _)| at)
+            .collect();
+        for at in latched {
+            if let Some(p) = self.pending_skills[at].precondition.as_mut() {
+                p.met = true;
+            }
+        }
+
         let mut i = self.pending_skills.len();
         while i > 0 {
             i -= 1;
@@ -609,7 +643,9 @@ impl Runner {
             let cooled_down = self.accumulate_time.t >= self.pending_skills[i].ready_at;
             if self.position >= trigger.start
                 && cooled_down
-                && (forced || self.pending_extra_passes(i, field))
+                && (forced
+                    || (DynamicPrecondition::is_met(self.pending_skills[i].precondition.as_ref())
+                        && self.pending_extra_passes(i, field)))
             {
                 let skip =
                     forced || self.pending_skills[i].wit_passed || self.should_skip_wit_check_at(i);
@@ -1419,6 +1455,28 @@ mod tests {
             "empty precondition must behave like no precondition, not suppress the trigger"
         );
         assert!(!triggers[0].regions.0.is_empty());
+    }
+
+    #[test]
+    fn a_precondition_keeps_its_runtime_half() {
+        // Certain Victory's shape: a static precondition part (phase) and a
+        // dynamic one (order). The static part narrows the window as before;
+        // the dynamic part is carried, unmet, for the race to latch.
+        let mut skill = target_speed_skill("910031", SkillRarity::Gold, "phase>=2");
+        skill.alternatives[0].precondition = Some("phase>=1&order<=5".to_owned());
+        let triggers = build(&skill);
+        assert_eq!(triggers.len(), 1);
+        let pre = triggers[0]
+            .precondition
+            .as_ref()
+            .expect("the order check is carried");
+        assert!(!pre.met);
+        assert!(!DynamicPrecondition::is_met(Some(pre)));
+        assert!(DynamicPrecondition::is_met(None));
+
+        // A purely static precondition carries nothing to latch.
+        skill.alternatives[0].precondition = Some("phase>=1".to_owned());
+        assert!(build(&skill)[0].precondition.is_none());
     }
 
     #[test]

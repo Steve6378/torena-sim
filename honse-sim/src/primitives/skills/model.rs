@@ -291,6 +291,43 @@ pub struct SkillTrigger {
     pub duration_scaling: Option<i32>,
     /// The alternative's base cooldown (raw x10000 seconds), if any.
     pub cooldown_time: Option<f64>,
+    /// The runtime half of the alternative's precondition, if it has one.
+    pub precondition: Option<DynamicPrecondition>,
+}
+
+/// The runtime half of a skill's precondition.
+///
+/// A precondition's static part (course position, phase, corner) already
+/// narrows the trigger to start where it first holds. Its dynamic part (order,
+/// overtake targets, nearby runners, the gap to the leader) is checked here,
+/// every tick the runner is inside `regions`, and once it has held the skill's
+/// own condition is armed for the rest of the race. Before this, the dynamic
+/// part was dropped: on the 117 recordings, the carriers of Certain Victory,
+/// Lights of Vaudeville and My True Strength fired them 7%, 45% and 15% of the
+/// time, and the engine about 92%, which is its wit roll and nothing else.
+#[derive(Debug, Clone)]
+pub struct DynamicPrecondition {
+    /// Where the precondition's static part holds.
+    pub regions: RegionList,
+    /// Its dynamic part.
+    pub check: DynamicCondition,
+    /// Whether it has held yet this race.
+    pub met: bool,
+}
+
+impl DynamicPrecondition {
+    /// Whether the precondition allows the skill's condition to be checked.
+    pub fn is_met(precondition: Option<&DynamicPrecondition>) -> bool {
+        precondition.is_none_or(|p| p.met)
+    }
+
+    /// Whether `position` is inside the precondition's static regions.
+    pub fn covers(&self, position: f64) -> bool {
+        self.regions
+            .0
+            .iter()
+            .any(|r| position >= r.start && position < r.end)
+    }
 }
 
 /// Duration multiplier for a skill's `ability_time_usage` code, resolved at
@@ -412,6 +449,8 @@ pub struct PendingSkill {
     /// condition gates and the wit check are bypassed, matching injected-debuff
     /// semantics.
     pub forced: bool,
+    /// The runtime half of the precondition, latched once it holds.
+    pub precondition: Option<DynamicPrecondition>,
 }
 
 /// An opponent-facing (external) debuff a runner emitted this frame, awaiting the

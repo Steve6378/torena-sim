@@ -890,6 +890,7 @@ mod tests {
             ready_at: f64::NEG_INFINITY,
             wit_passed: false,
             forced: false,
+            precondition: None,
         });
 
         assert!(

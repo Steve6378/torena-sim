@@ -74,6 +74,8 @@ pub struct SnapEntry {
     pub is_rushed: bool,
     /// Whether the runner is dueling.
     pub is_dueling: bool,
+    /// Whether the runner has already had its duel this race (Showdown over).
+    pub has_dueled: bool,
     /// Bitmask of positive self-applied effect types activated so far.
     pub activated_advantage_effect_types: u64,
 }
@@ -172,6 +174,7 @@ pub fn build_field_snapshot(
             gate: r.gate,
             is_rushed: r.is_rushed,
             is_dueling: r.is_dueling,
+            has_dueled: r.has_dueled,
             activated_advantage_effect_types: r.activated_advantage_effect_types,
         })
         .collect();
@@ -422,6 +425,7 @@ pub fn build_field_view(
             gate: e.gate,
             is_rushed: e.is_rushed,
             is_dueling: e.is_dueling,
+            has_dueled: e.has_dueled,
             activated_advantage_effect_types: e.activated_advantage_effect_types,
         })
         .collect();
@@ -594,6 +598,7 @@ mod tests {
             gate: 0,
             is_rushed: false,
             is_dueling: false,
+            has_dueled: false,
             activated_advantage_effect_types: 0,
         }
     }

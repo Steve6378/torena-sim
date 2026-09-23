@@ -124,6 +124,8 @@ pub struct ActiveRunner {
     pub is_rushed: bool,
     /// Whether the runner is currently in a duel.
     pub is_dueling: bool,
+    /// Whether the runner's duel is already over (one Showdown per race).
+    pub has_dueled: bool,
     /// Bitmask of positive self-applied effect types this runner has activated
     /// (bit `n` => SkillType id `n`). Read by
     /// `is_other_character_activate_advantage_skill`.
