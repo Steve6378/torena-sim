@@ -29,8 +29,8 @@ use crate::skills::debuff::{get_external_debuff_effects, is_emittable_external_e
 use crate::skills::effect::{SkillRarity, SkillType};
 use crate::skills::model::{
     build_skill_effects, duration_scaling_multiplier, ActiveSkill, ActiveTargetedSkill,
-    EmittedDebuff, PendingSkill, PendingTargetedSkill, ResolvedSkillEffect, Skill, SkillEffectSpec,
-    SkillTrigger, TargetedSkillOrigin,
+    EmittedDebuff, HeldAdditionalEffect, OrderUpExtension, PendingSkill, PendingTargetedSkill,
+    ResolvedSkillEffect, Skill, SkillEffectSpec, SkillTrigger, TargetedSkillOrigin,
 };
 use crate::skills::recovery::resolve_effect_modifier;
 
@@ -372,6 +372,8 @@ impl Runner {
         self.emitted_debuffs.clear();
         self.pending_skill_removal.clear();
         self.pending_skills.clear();
+        self.held_additional_effects.clear();
+        self.order_up_extensions.clear();
         self.pending_targeted_skills.clear();
 
         let eval_runner = self.skill_eval_runner();
@@ -541,6 +543,14 @@ impl Runner {
         self.activation_distance_from_top = field
             .leader_position
             .map_or(0.0, |leader| (leader - self.position).max(0.0));
+        // An overtake this tick (order improved on the previous tick's; one per
+        // tick however many runners were passed -- the doc does not say) acts on
+        // skills already running, before any new activation this tick.
+        if let (Some(previous), Some(current)) = (field.self_previous_order, field.self_order) {
+            if current < previous {
+                self.on_order_up();
+            }
+        }
 
         let mut i = self.pending_skills.len();
         while i > 0 {
@@ -598,6 +608,68 @@ impl Runner {
             .retain(|s| s.duration_timer.t < 0.0);
         self.change_lane_skills_active
             .retain(|s| s.duration_timer.t < 0.0);
+        self.held_additional_effects.retain(|h| h.timer.t < 0.0);
+        self.order_up_extensions.retain(|e| e.timer.t < 0.0);
+    }
+
+    /// An overtake: lengthen code-4 skills (mechanics doc § IncrementOrderUp,
+    /// +1 s x distance / 1000 to every modifier the skill applied, up to 3
+    /// times), then fire OrderUp additional activations.
+    fn on_order_up(&mut self) {
+        let mut extend: Vec<(SkillId, f64)> = Vec::new();
+        for extension in &mut self.order_up_extensions {
+            if extension.remaining > 0 && extension.timer.t < 0.0 {
+                extension.remaining -= 1;
+                extend.push((extension.skill_id.clone(), extension.seconds));
+            }
+        }
+        for (skill_id, seconds) in extend {
+            for list in [
+                &mut self.target_speed_skills_active,
+                &mut self.current_speed_skills_active,
+                &mut self.acceleration_skills_active,
+                &mut self.lane_movement_skills_active,
+                &mut self.change_lane_skills_active,
+            ] {
+                for active in list.iter_mut().filter(|a| a.skill_id == skill_id) {
+                    active.duration_timer.t -= seconds;
+                }
+            }
+            for held in self
+                .held_additional_effects
+                .iter_mut()
+                .filter(|h| h.skill.skill_id == skill_id)
+            {
+                held.timer.t -= seconds;
+            }
+            for extension in self
+                .order_up_extensions
+                .iter_mut()
+                .filter(|e| e.skill_id == skill_id)
+            {
+                extension.timer.t -= seconds;
+            }
+        }
+        self.fire_held_additional_effects(|held| held.trigger == 1);
+    }
+
+    /// Apply every held additional effect whose trigger matches, once each, for
+    /// its skill's remaining duration (mechanics doc § Additional Activate).
+    fn fire_held_additional_effects(&mut self, matches: impl Fn(&HeldAdditionalEffect) -> bool) {
+        let mut fired: Vec<(PendingSkill, SkillEffectSpec, f64)> = Vec::new();
+        for held in &mut self.held_additional_effects {
+            if held.remaining > 0 && held.timer.t < 0.0 && matches(held) {
+                held.remaining -= 1;
+                fired.push((held.skill.clone(), held.spec, -held.timer.t));
+            }
+        }
+        for (skill, spec, remaining) in fired {
+            let resolved = self.resolve_effect(skill.skill_id.base(), &spec);
+            if is_emittable_external_effect(&resolved) {
+                continue; // additional activations in the data are self-buffs
+            }
+            self.apply_self_effect(&skill, &resolved, remaining);
+        }
     }
 
     fn pending_extra_passes(&self, idx: usize, field: &FieldView) -> bool {
@@ -664,7 +736,35 @@ impl Runner {
         specs.sort_by_key(|e| i32::from(e.effect_type as i32 == 42));
         let base_skill_id = skill.skill_id.base().to_owned();
 
+        let time_scaling = duration_scaling_multiplier(
+            skill.duration_scaling,
+            self.health_policy.current_health(),
+            self.activation_distance_from_top,
+        );
+        let mut skill_duration: f64 = 0.0;
         for spec in &specs {
+            let scaling = if skill.rarity == SkillRarity::Evolution {
+                self.modifiers.special_skill_duration_scaling
+            } else {
+                1.0
+            };
+            let scaled_duration =
+                spec.base_duration * (course_distance / 1000.0) * scaling * time_scaling;
+            skill_duration = skill_duration.max(scaled_duration);
+
+            // An additional-activation effect does nothing now: it waits on its
+            // trigger for as long as the skill runs.
+            if let Some(trigger @ 1..=3) = spec.additional_activate_type {
+                self.held_additional_effects.push(HeldAdditionalEffect {
+                    skill: skill.clone(),
+                    spec: *spec,
+                    trigger,
+                    remaining: HeldAdditionalEffect::limit(trigger),
+                    timer: Timer::new(-scaled_duration),
+                });
+                continue;
+            }
+
             // Resolve the effect's value-scaling policy exactly once against the
             // caster's state, before self-application or external-debuff routing.
             let resolved = self.resolve_effect(&base_skill_id, spec);
@@ -694,19 +794,15 @@ impl Runner {
                     self.activated_advantage_effect_types |= 1u64 << t;
                 }
             }
-            let scaling = if skill.rarity == SkillRarity::Evolution {
-                self.modifiers.special_skill_duration_scaling
-            } else {
-                1.0
-            };
-            let time_scaling = duration_scaling_multiplier(
-                skill.duration_scaling,
-                self.health_policy.current_health(),
-                self.activation_distance_from_top,
-            );
-            let scaled_duration =
-                resolved.base_duration * (course_distance / 1000.0) * scaling * time_scaling;
             self.apply_self_effect(skill, &resolved, scaled_duration);
+        }
+        if skill.duration_scaling == Some(4) && skill_duration > 0.0 {
+            self.order_up_extensions.push(OrderUpExtension {
+                skill_id: skill.skill_id.clone(),
+                remaining: 3,
+                seconds: course_distance / 1000.0,
+                timer: Timer::new(-skill_duration),
+            });
         }
 
         let half_race = usize::from(self.position >= course_distance / 2.0);
@@ -717,6 +813,11 @@ impl Runner {
         // Record only after a successful activation so caster-context scaling
         // (usage 14) counts greens that actually fired this round.
         self.activated_ledger.record(&base_skill_id, &skill.tags);
+        // ActivateAnySkill: running skills' held effects fire on this one.
+        let activated = skill.skill_id.clone();
+        self.fire_held_additional_effects(|held| {
+            (held.trigger == 2 || held.trigger == 3) && held.skill.skill_id != activated
+        });
     }
 
     fn apply_self_effect(
@@ -1131,6 +1232,7 @@ mod tests {
                     value_usage: None,
                     value_level_usage: None,
                     pre_applied_multiplier: None,
+                    additional_activate_type: None,
                 }],
             }],
         }
@@ -1156,6 +1258,7 @@ mod tests {
                         value_usage: Some(1),
                         value_level_usage: Some(1),
                         pre_applied_multiplier: None,
+                        additional_activate_type: None,
                     },
                     RawSkillEffect {
                         modifier: 100000.0,
@@ -1164,6 +1267,7 @@ mod tests {
                         value_usage: Some(1),
                         value_level_usage: Some(1),
                         pre_applied_multiplier: None,
+                        additional_activate_type: None,
                     },
                 ],
             }],
@@ -1188,6 +1292,7 @@ mod tests {
                     value_usage: Some(1),
                     value_level_usage: Some(1),
                     pre_applied_multiplier: None,
+                    additional_activate_type: None,
                 }],
             }],
         }
@@ -1349,6 +1454,7 @@ mod tests {
                     value_usage: Some(1),
                     value_level_usage: Some(1),
                     pre_applied_multiplier: None,
+                    additional_activate_type: None,
                 }],
             }],
         };
@@ -1373,6 +1479,7 @@ mod tests {
                             value_usage: Some(1),
                             value_level_usage: None,
                             pre_applied_multiplier: None,
+                            additional_activate_type: None,
                         },
                         RawSkillEffect {
                             modifier: 500.0,
@@ -1381,6 +1488,7 @@ mod tests {
                             value_usage: Some(14),
                             value_level_usage: None,
                             pre_applied_multiplier: None,
+                            additional_activate_type: None,
                         },
                         RawSkillEffect {
                             modifier: 500.0,
@@ -1389,6 +1497,7 @@ mod tests {
                             value_usage: Some(14),
                             value_level_usage: None,
                             pre_applied_multiplier: None,
+                            additional_activate_type: None,
                         },
                     ],
                 }],
@@ -1412,6 +1521,7 @@ mod tests {
                             value_usage: Some(1),
                             value_level_usage: Some(1),
                             pre_applied_multiplier: None,
+                            additional_activate_type: None,
                         },
                         RawSkillEffect {
                             modifier: 50000.0,
@@ -1420,6 +1530,7 @@ mod tests {
                             value_usage: Some(1),
                             value_level_usage: Some(1),
                             pre_applied_multiplier: None,
+                            additional_activate_type: None,
                         },
                     ],
                 }],
@@ -1456,6 +1567,7 @@ mod tests {
                     value_usage: Some(1),
                     value_level_usage: Some(1),
                     pre_applied_multiplier: None,
+                    additional_activate_type: None,
                 }],
             }],
         };
@@ -1688,6 +1800,7 @@ mod tests {
                     value_usage: None,
                     value_level_usage: None,
                     pre_applied_multiplier: None,
+                    additional_activate_type: None,
                 }],
             }],
         }
@@ -1765,6 +1878,140 @@ mod tests {
         r.process_skill_activations(&field, 2400.0);
         assert_eq!(r.target_speed_skills_active.len(), 1);
         -r.target_speed_skills_active[0].duration_timer.t
+    }
+
+    /// A target-speed skill (4500) with a second target-speed effect (500)
+    /// held as an additional activation of `trigger`.
+    fn skill_with_held_effect(id: &str, trigger: i32) -> Skill {
+        let mut skill = target_speed_skill(id, SkillRarity::Gold, "phase>=2");
+        let mut held = skill.alternatives[0].effects[0];
+        held.modifier = 500.0;
+        held.additional_activate_type = Some(trigger);
+        skill.alternatives[0].effects.push(held);
+        skill
+    }
+
+    /// Prepare `skills`, then place the runner inside the first pending
+    /// trigger and run one activation pass with `field`.
+    fn activate_first(r: &mut Runner, field: &FieldView) {
+        let trigger = r.pending_skills[0].trigger;
+        r.position = trigger.start + 0.5;
+        r.process_skill_activations(field, 2400.0);
+    }
+
+    fn overtaking() -> FieldView {
+        FieldView {
+            self_previous_order: Some(5),
+            self_order: Some(4),
+            ..FieldView::default()
+        }
+    }
+
+    #[test]
+    fn additional_activation_order_up_fires_on_overtakes_only_up_to_three() {
+        // Mechanics doc § Additional Activate / OrderUp: the effect does nothing
+        // at activation; it applies for the remaining duration on each overtake,
+        // up to 3 times.
+        let mut r = runner_with_skills(vec![skill_with_held_effect("100531", 1)]);
+        prepare(&mut r);
+        r.wit_checks_enabled = false;
+        activate_first(&mut r, &FieldView::at_gate());
+        assert_eq!(
+            r.target_speed_skills_active.len(),
+            1,
+            "held effect not applied at activation"
+        );
+        assert!((r.modifiers.target_speed.total() - 0.45).abs() < 1e-9);
+
+        // A pass with no overtake fires nothing.
+        r.process_skill_activations(&FieldView::default(), 2400.0);
+        assert_eq!(r.target_speed_skills_active.len(), 1);
+
+        for _ in 0..5 {
+            r.process_skill_activations(&overtaking(), 2400.0);
+        }
+        assert_eq!(
+            r.target_speed_skills_active.len(),
+            4,
+            "1 + 3 firings, capped"
+        );
+        assert!((r.modifiers.target_speed.total() - (0.45 + 3.0 * 0.05)).abs() < 1e-9);
+        // Each firing runs for the skill's remaining duration, not a fresh one.
+        let base = -r.target_speed_skills_active[0].duration_timer.t;
+        for fired in &r.target_speed_skills_active[1..] {
+            assert!((-fired.duration_timer.t - base).abs() < 1e-9);
+        }
+    }
+
+    #[test]
+    fn additional_activation_any_skill_fires_on_other_skills_not_itself() {
+        // Type 3 (ActivateAnySkill type 2): each OTHER skill activated, up to 2.
+        let mut skills = vec![skill_with_held_effect("110211", 3)];
+        for id in ["200001", "200002", "200003"] {
+            skills.push(target_speed_skill(id, SkillRarity::White, "phase>=2"));
+        }
+        let mut r = runner_with_skills(skills);
+        prepare(&mut r);
+        r.wit_checks_enabled = false;
+        // Activate the carrier alone first.
+        let carrier = r
+            .pending_skills
+            .iter()
+            .position(|p| p.skill_id.as_str() == "110211")
+            .expect("carrier pending");
+        let carrier_skill = r.pending_skills.remove(carrier);
+        r.position = carrier_skill.trigger.start + 0.5;
+        r.pending_skills.insert(0, carrier_skill);
+        let others = r.pending_skills.split_off(1);
+        r.process_skill_activations(&FieldView::at_gate(), 2400.0);
+        assert_eq!(
+            r.target_speed_skills_active.len(),
+            1,
+            "its own activation does not fire it"
+        );
+
+        // Three other skills activate; the held effect fires on two of them.
+        r.pending_skills = others;
+        for p in &mut r.pending_skills {
+            p.trigger = Region::new(r.position - 1.0, r.position + 10.0);
+        }
+        r.process_skill_activations(&FieldView::at_gate(), 2400.0);
+        assert_eq!(r.target_speed_skills_active.len(), 1 + 3 + 2);
+    }
+
+    #[test]
+    fn duration_scaling_4_extends_every_modifier_per_overtake_up_to_three() {
+        // Mechanics doc § IncrementOrderUp: +1 s per overtake while active, up to
+        // 3, scaled by distance / 1000 like the base duration, applied to all
+        // the skill's modifiers.
+        let mut skill = target_speed_skill("100531", SkillRarity::Gold, "phase>=2");
+        skill.alternatives[0].duration_scaling = Some(4);
+        let mut r = runner_with_skills(vec![skill]);
+        prepare(&mut r);
+        r.wit_checks_enabled = false;
+        activate_first(&mut r, &FieldView::at_gate());
+        let before = -r.target_speed_skills_active[0].duration_timer.t;
+        for _ in 0..5 {
+            r.process_skill_activations(&overtaking(), 2400.0);
+        }
+        let after = -r.target_speed_skills_active[0].duration_timer.t;
+        assert!(
+            (after - before - 3.0 * 2.4).abs() < 1e-9,
+            "3 x 1 s x 2400 / 1000"
+        );
+
+        // Without code 4 an overtake changes nothing.
+        let mut r = runner_with_skills(vec![target_speed_skill(
+            "100531",
+            SkillRarity::Gold,
+            "phase>=2",
+        )]);
+        prepare(&mut r);
+        r.wit_checks_enabled = false;
+        activate_first(&mut r, &FieldView::at_gate());
+        let before = -r.target_speed_skills_active[0].duration_timer.t;
+        r.process_skill_activations(&overtaking(), 2400.0);
+        assert!((-r.target_speed_skills_active[0].duration_timer.t - before).abs() < 1e-9);
     }
 
     #[test]
@@ -1915,6 +2162,7 @@ mod tests {
                         value_usage: None,
                         value_level_usage: None,
                         pre_applied_multiplier: None,
+                        additional_activate_type: None,
                     },
                     RawSkillEffect {
                         modifier: -1500.0,
@@ -1923,6 +2171,7 @@ mod tests {
                         value_usage: None,
                         value_level_usage: None,
                         pre_applied_multiplier: None,
+                        additional_activate_type: None,
                     },
                 ],
             }],
@@ -1970,6 +2219,7 @@ mod tests {
                     value_usage: None,
                     value_level_usage: None,
                     pre_applied_multiplier: None,
+                    additional_activate_type: None,
                 }],
             }],
         };

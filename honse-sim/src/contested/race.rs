@@ -1228,6 +1228,7 @@ mod tests {
                     value_usage: Some(1),
                     value_level_usage: Some(1),
                     pre_applied_multiplier: None,
+                    additional_activate_type: None,
                 }],
             }],
         }];

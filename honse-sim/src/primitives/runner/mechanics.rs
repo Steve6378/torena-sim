@@ -857,6 +857,7 @@ mod tests {
                     base_duration: -1.0,
                     modifier: 60.0,
                     value_scaling: ValueScalingPolicy::Direct,
+                    additional_activate_type: None,
                     value_level_usage: Some(1),
                 },
                 SkillEffectSpec {
@@ -865,6 +866,7 @@ mod tests {
                     base_duration: -1.0,
                     modifier: -3.0,
                     value_scaling: ValueScalingPolicy::Direct,
+                    additional_activate_type: None,
                     value_level_usage: Some(1),
                 },
             ],

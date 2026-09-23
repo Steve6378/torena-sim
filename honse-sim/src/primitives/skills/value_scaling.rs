@@ -288,6 +288,7 @@ mod tests {
             base_duration: 0.0,
             modifier,
             value_scaling,
+            additional_activate_type: None,
             value_level_usage: None,
         }
     }
@@ -409,6 +410,7 @@ mod tests {
                     value_usage: Some(1),
                     value_level_usage: None,
                     pre_applied_multiplier: None,
+                    additional_activate_type: None,
                 },
                 RawSkillEffect {
                     modifier: 500.0,
@@ -417,6 +419,7 @@ mod tests {
                     value_usage: Some(14),
                     value_level_usage: None,
                     pre_applied_multiplier: None,
+                    additional_activate_type: None,
                 },
                 RawSkillEffect {
                     modifier: 500.0,
@@ -425,6 +428,7 @@ mod tests {
                     value_usage: Some(14),
                     value_level_usage: None,
                     pre_applied_multiplier: None,
+                    additional_activate_type: None,
                 },
             ],
         };

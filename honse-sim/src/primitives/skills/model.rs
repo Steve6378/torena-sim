@@ -50,6 +50,14 @@ pub struct RawSkillEffect {
     /// up to 1.2x with no way to notice.
     #[serde(default)]
     pub pre_applied_multiplier: Option<f64>,
+    /// Additional activation (`additional_activate_type`; mechanics doc §
+    /// Additional Activate): the effect does nothing at activation and is
+    /// applied, for the skill's remaining duration, each time its trigger
+    /// fires while the skill is active. 1 OrderUp (each overtake, up to 3),
+    /// 2 ActivateAnySkill type 1 (each other skill activated, up to 3), 3
+    /// type 2 (up to 2). `None` = applied at activation.
+    #[serde(default)]
+    pub additional_activate_type: Option<i32>,
 }
 
 /// A single alternative (condition branch) of a skill's effect data.
@@ -108,6 +116,9 @@ pub struct SkillEffectSpec {
     pub modifier: f64,
     /// How the runtime modifier is derived from `modifier`.
     pub value_scaling: ValueScalingPolicy,
+    /// Additional activation trigger (see
+    /// [`RawSkillEffect::additional_activate_type`]); `None` = at activation.
+    pub additional_activate_type: Option<i32>,
     /// Optional level-usage discriminator (carried only; level scaling is out of
     /// scope for value resolution).
     pub value_level_usage: Option<i32>,
@@ -186,6 +197,7 @@ fn classify_effect(
         base_duration,
         modifier: effect.modifier / 10000.0,
         value_scaling,
+        additional_activate_type: effect.additional_activate_type,
         value_level_usage: effect.value_level_usage,
     })
 }
@@ -313,6 +325,48 @@ pub fn duration_scaling_multiplier(code: Option<i32>, hp: f64, distance_from_top
         ),
         _ => 1.0,
     }
+}
+
+/// An additional-activation effect (mechanics doc § Additional Activate),
+/// held back when its skill activates and applied, for the skill's remaining
+/// duration, each time its trigger fires while the skill is active.
+#[derive(Debug, Clone)]
+pub struct HeldAdditionalEffect {
+    /// The skill that carries the effect (identity for the active-skill lists).
+    pub skill: PendingSkill,
+    /// The held effect.
+    pub spec: SkillEffectSpec,
+    /// `additional_activate_type`: 1 OrderUp, 2 / 3 ActivateAnySkill.
+    pub trigger: i32,
+    /// Firings left (3 for types 1 and 2, 2 for type 3).
+    pub remaining: u32,
+    /// The skill's remaining duration, counting up to 0 like an active skill's.
+    pub timer: Timer,
+}
+
+impl HeldAdditionalEffect {
+    /// Firing limit per trigger type, from the doc.
+    pub fn limit(trigger: i32) -> u32 {
+        if trigger == 3 {
+            2
+        } else {
+            3
+        }
+    }
+}
+
+/// Duration code 4 (IncrementOrderUp) for one running skill: each overtake
+/// while it is active lengthens every modifier it applied.
+#[derive(Debug, Clone)]
+pub struct OrderUpExtension {
+    /// The running skill.
+    pub skill_id: SkillId,
+    /// Extensions left (the doc: up to 3 times).
+    pub remaining: u32,
+    /// Seconds added per overtake: 1 s x course distance / 1000.
+    pub seconds: f64,
+    /// The skill's remaining duration, counting up to 0.
+    pub timer: Timer,
 }
 
 /// A skill whose trigger point has been fixed, awaiting the runner reaching it.
@@ -452,6 +506,7 @@ mod tests {
                     value_usage: None,
                     value_level_usage: None,
                     pre_applied_multiplier: None,
+                    additional_activate_type: None,
                 },
                 RawSkillEffect {
                     modifier: -10000.0,
@@ -460,6 +515,7 @@ mod tests {
                     value_usage: Some(8),
                     value_level_usage: None,
                     pre_applied_multiplier: None,
+                    additional_activate_type: None,
                 },
             ],
         };
@@ -493,6 +549,7 @@ mod tests {
                     value_usage: Some(1),
                     value_level_usage: Some(1),
                     pre_applied_multiplier: None,
+                    additional_activate_type: None,
                 },
                 RawSkillEffect {
                     modifier: 100000.0,
@@ -501,6 +558,7 @@ mod tests {
                     value_usage: Some(1),
                     value_level_usage: Some(1),
                     pre_applied_multiplier: None,
+                    additional_activate_type: None,
                 },
             ],
         };
@@ -531,6 +589,7 @@ mod tests {
                     value_usage: Some(1),
                     value_level_usage: None,
                     pre_applied_multiplier: None,
+                    additional_activate_type: None,
                 },
                 RawSkillEffect {
                     modifier: 500.0,
@@ -539,6 +598,7 @@ mod tests {
                     value_usage: Some(12),
                     value_level_usage: None,
                     pre_applied_multiplier: None,
+                    additional_activate_type: None,
                 },
                 RawSkillEffect {
                     modifier: 500.0,
@@ -547,6 +607,7 @@ mod tests {
                     value_usage: Some(1),
                     value_level_usage: None,
                     pre_applied_multiplier: None,
+                    additional_activate_type: None,
                 },
                 RawSkillEffect {
                     modifier: 500.0,
@@ -555,6 +616,7 @@ mod tests {
                     value_usage: Some(19),
                     value_level_usage: None,
                     pre_applied_multiplier: None,
+                    additional_activate_type: None,
                 },
             ],
         };
@@ -589,6 +651,7 @@ mod tests {
                 value_usage: None,
                 value_level_usage: None,
                 pre_applied_multiplier: None,
+                additional_activate_type: None,
             }],
         };
         assert!(unmodeled_effects(&alt).is_empty());
@@ -609,6 +672,7 @@ mod tests {
                 value_usage: None,
                 value_level_usage: None,
                 pre_applied_multiplier: None,
+                additional_activate_type: None,
             }],
         };
         assert!(build_skill_effects(&alt).is_empty());
@@ -637,6 +701,7 @@ mod tests {
                     value_usage: None,
                     value_level_usage: None,
                     pre_applied_multiplier: None,
+                    additional_activate_type: None,
                 }],
             }],
         };

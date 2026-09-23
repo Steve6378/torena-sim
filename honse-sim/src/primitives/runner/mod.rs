@@ -474,6 +474,10 @@ pub struct Runner {
     /// Metres behind the leader when the current activation pass began (0 at
     /// the gate or when leading). Read by duration scaling code 2.
     pub activation_distance_from_top: f64,
+    /// Additional-activation effects of running skills, awaiting triggers.
+    pub held_additional_effects: Vec<crate::skills::model::HeldAdditionalEffect>,
+    /// Running skills with duration code 4, awaiting overtakes.
+    pub order_up_extensions: Vec<crate::skills::model::OrderUpExtension>,
     /// Pending targeted skills awaiting their trigger.
     pub pending_targeted_skills: Vec<PendingTargetedSkill>,
     /// Skill ids flagged for removal next activation pass.

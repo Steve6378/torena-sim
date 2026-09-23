@@ -319,6 +319,12 @@ impl Runner {
         advance_skill_timers(&mut self.acceleration_skills_active, dt);
         advance_skill_timers(&mut self.lane_movement_skills_active, dt);
         advance_skill_timers(&mut self.change_lane_skills_active, dt);
+        for held in &mut self.held_additional_effects {
+            held.timer.advance(dt);
+        }
+        for extension in &mut self.order_up_extensions {
+            extension.timer.advance(dt);
+        }
         advance_targeted_skill_timers(&mut self.targeted_target_speed_active, dt);
         advance_targeted_skill_timers(&mut self.targeted_current_speed_active, dt);
         advance_targeted_skill_timers(&mut self.targeted_acceleration_active, dt);
