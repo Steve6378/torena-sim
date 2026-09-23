@@ -75,6 +75,7 @@ fn skill(id: &str) -> Skill {
             // hide the reshuffling this test exists to catch.
             base_duration: 30000.0,
             cooldown_time: None,
+            duration_scaling: None,
             condition: "phase_random==1".to_owned(),
             precondition: None,
             effects: vec![RawSkillEffect {

@@ -464,6 +464,9 @@ pub struct WasmSkillAlternative {
     /// Optional cooldown.
     #[serde(default)]
     pub cooldown_time: Option<f64>,
+    /// Duration scaling code (`ability_time_usage`); `None` = Direct.
+    #[serde(default)]
+    pub duration_scaling: Option<i32>,
     /// Activation condition DSL.
     pub condition: String,
     /// Optional precondition DSL.
@@ -516,6 +519,7 @@ impl WasmSkillInput {
                 Ok(SkillAlternative {
                     base_duration: alternative.base_duration,
                     cooldown_time: alternative.cooldown_time,
+                    duration_scaling: alternative.duration_scaling,
                     condition: alternative.condition,
                     precondition: alternative.precondition,
                     effects,
@@ -671,6 +675,7 @@ pub fn build_skill_support_report(
             let domain = SkillAlternative {
                 base_duration: alternative.base_duration,
                 cooldown_time: alternative.cooldown_time,
+                duration_scaling: alternative.duration_scaling,
                 condition: alternative.condition.clone(),
                 precondition: alternative.precondition.clone(),
                 effects: kept,

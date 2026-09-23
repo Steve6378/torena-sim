@@ -398,6 +398,7 @@ mod tests {
         let alt = SkillAlternative {
             base_duration: 50000.0,
             cooldown_time: None,
+            duration_scaling: None,
             condition: "phase>=2".to_owned(),
             precondition: None,
             effects: vec![

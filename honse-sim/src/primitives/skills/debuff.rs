@@ -187,6 +187,7 @@ mod tests {
             alternatives: vec![SkillAlternative {
                 base_duration: 0.0,
                 cooldown_time: None,
+                duration_scaling: None,
                 condition: String::new(),
                 precondition: None,
                 effects,
