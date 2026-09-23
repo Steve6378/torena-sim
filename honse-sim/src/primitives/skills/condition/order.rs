@@ -5,7 +5,8 @@
 //! through [`RunnerView`]) to gate order-relative skills.
 
 use crate::skills::condition::dynamic::{
-    bool_num, compare, register_dynamic_condition, DynamicCondition, RunnerView,
+    bool_num, compare, order_rate_band_index, register_dynamic_condition, DynamicCondition,
+    RunnerView,
 };
 
 use crate::skills::condition::operator::CmpKind;
@@ -28,7 +29,20 @@ fn order_rate_continue(
     } else {
         order > threshold
     };
-    let active = runner.accumulate_time() > CONTINUE_GRACE_PERIOD_SECONDS && within_rate;
+    // "For the entire race until now" (GameTora): the live field latches the
+    // band from 5 s on, so one tick on the wrong side ends it for the race.
+    // Without a live field, only the current tick can be read.
+    let held = match (runner.condition_timers(), order_rate_band_index(rate)) {
+        (Some(t), Some(i)) => {
+            if is_in_rate {
+                t.in_band[i]
+            } else {
+                t.out_band[i]
+            }
+        }
+        _ => true,
+    };
+    let active = runner.accumulate_time() > CONTINUE_GRACE_PERIOD_SECONDS && within_rate && held;
     compare(bool_num(active), arg as f64, cmp)
 }
 
@@ -139,9 +153,13 @@ pub fn register_order_conditions() {
         })
     });
 
+    // GameTora: "the uma behind you is closer to the inner fence than you" --
+    // the runner directly behind in placement. v0.13.0 compared the runner's own
+    // placement with the argument, so `is_behind_in==1` held only for the
+    // leader. Without a live field there is no one behind to read.
     register_dynamic_condition("is_behind_in", |arg, cmp| {
-        DynamicCondition::new(move |r| match r.current_order() {
-            Some(order) => compare(order as f64, arg as f64, cmp),
+        DynamicCondition::new(move |r| match r.condition_timers() {
+            Some(t) => compare(bool_num(t.behind_is_inner), arg as f64, cmp),
             None => false,
         })
     });

@@ -18,7 +18,7 @@ use uma_sim_primitives::position_keep::{update_position_keep_coefficient, Positi
 use uma_sim_primitives::race_support::{
     assign_gates, build_field_snapshot, build_field_view, front_blocking_runner,
     has_side_blocking_runner, is_overtaking_runner, proximity_snapshots, resolve_debuff_targets,
-    FieldOrderTracker, FieldSnapshot,
+    update_condition_timers, FieldOrderTracker, FieldSnapshot,
 };
 use uma_sim_primitives::runner::lifecycle::{CreateRunner, PrepareContext};
 use uma_sim_primitives::runner::physics::{
@@ -370,10 +370,17 @@ impl Race {
         self.emit_before_tick(dt);
         self.accumulated_time += dt;
 
-        let snapshot = build_field_snapshot(
+        let mut snapshot = build_field_snapshot(
             &self.runners,
             &self.finished_runners,
             &mut self.order_tracker,
+        );
+        update_condition_timers(
+            &mut snapshot,
+            &mut self.order_tracker,
+            &self.runners,
+            dt,
+            self.course.horse_lane,
         );
         let proximity = proximity_snapshots(&snapshot);
 

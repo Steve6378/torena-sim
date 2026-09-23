@@ -18,7 +18,9 @@ use crate::runner::Runner;
 use crate::shared_kernel::ids::RunnerId;
 use crate::shared_kernel::language::{strategy_matches, Strategy};
 use crate::shared_kernel::rng::Prng;
-use crate::skills::condition::dynamic::{ActiveRunner, RunnerSnapshot as DynRunnerSnapshot};
+use crate::skills::condition::dynamic::{
+    ActiveRunner, ConditionTimers, RunnerSnapshot as DynRunnerSnapshot, ORDER_RATE_BANDS,
+};
 use crate::skills::effect::SkillTarget;
 
 /// A read-only snapshot of the whole field, frozen at the start of a frame.
@@ -44,6 +46,9 @@ pub struct FieldSnapshot {
     /// Total field size (finished + active). Used as `num_umas` for order
     /// conditions so thresholds do not shrink as runners cross the line.
     pub num_total: i64,
+    /// Per-runner condition timers and latches as of this frame, filled by
+    /// [`update_condition_timers`] (empty until it runs).
+    pub condition_timers: HashMap<RunnerId, ConditionTimers>,
 }
 
 /// One active runner's frozen per-frame state.
@@ -90,6 +95,8 @@ pub struct FieldOrderTracker {
     pub runner_order: HashMap<RunnerId, i64>,
     /// Previous-tick finishing order.
     pub previous_runner_order: HashMap<RunnerId, i64>,
+    /// Per-runner condition timers and latches, carried across frames.
+    pub condition_timers: HashMap<RunnerId, ConditionTimers>,
 }
 
 impl FieldOrderTracker {
@@ -105,6 +112,7 @@ impl FieldOrderTracker {
         self.opening_pacemaker = None;
         self.runner_order.clear();
         self.previous_runner_order.clear();
+        self.condition_timers.clear();
     }
 }
 
@@ -217,6 +225,152 @@ pub fn build_field_snapshot(
         pacer_strategy,
         second_place_position,
         leader_position,
+        condition_timers: HashMap::new(),
+    }
+}
+
+/// Seconds to look ahead for an overtake target (GameTora: "you can catch up
+/// with her within 15 seconds at the current speed").
+const OVERTAKE_CATCH_SECONDS: f64 = 15.0;
+/// How far ahead an overtake target can be (GameTora: "up to 20 meters").
+const OVERTAKE_RANGE_METERS: f64 = 20.0;
+/// `*_near_lane_time`: 2.5 m and 1 lane; `behind_near_lane_time_set1`: 5 m and
+/// 2.7 lanes (GameTora).
+const NEAR_LANE_METERS: f64 = 2.5;
+const NEAR_LANE_LANES: f64 = 1.0;
+const NEAR_LANE_SET1_METERS: f64 = 5.0;
+const NEAR_LANE_SET1_LANES: f64 = 2.7;
+/// Side blocking: within 3 m along the course and 1 lane across, on another
+/// line (the window `blocked_side` already reads).
+const SIDE_BLOCK_METERS: f64 = 3.0;
+const SIDE_BLOCK_LANES: f64 = 1.0;
+const SIDE_BLOCK_LANE_EPSILON: f64 = 0.00001;
+/// The `*_continue` conditions ignore the first 5 s of the race (GameTora).
+const ORDER_CONTINUE_GRACE_SECONDS: f64 = 5.0;
+
+/// Whether `ahead` is an overtake target of `behind`: up to 20 m ahead, and
+/// caught within 15 s at the two runners' current speeds.
+fn is_overtake_target(behind: &SnapEntry, ahead: &SnapEntry) -> bool {
+    let gap = ahead.position - behind.position;
+    let closing = behind.current_speed - ahead.current_speed;
+    gap > 0.0
+        && gap <= OVERTAKE_RANGE_METERS
+        && closing > 0.0
+        && gap / closing <= OVERTAKE_CATCH_SECONDS
+}
+
+/// Advance every active runner's condition timers by one `dt` step and copy
+/// them into the snapshot, so the conditions read durations and histories
+/// instead of the race clock. Called once per frame, right after
+/// [`build_field_snapshot`]; `elapsed` is each runner's own race time (the
+/// `*_continue` grace period is measured on it).
+pub fn update_condition_timers(
+    snapshot: &mut FieldSnapshot,
+    tracker: &mut FieldOrderTracker,
+    runners: &[Runner],
+    dt: f64,
+    horse_lane: f64,
+) {
+    let n = snapshot.num_total.max(1) as f64;
+    let thresholds: Vec<i64> = ORDER_RATE_BANDS
+        .iter()
+        .map(|b| (n * b).round() as i64)
+        .collect();
+    let mut by_order: Vec<&SnapEntry> = snapshot.entries.iter().collect();
+    by_order.sort_by(|a, b| {
+        let oa = snapshot.order.get(&a.id).copied().unwrap_or(i64::MAX);
+        let ob = snapshot.order.get(&b.id).copied().unwrap_or(i64::MAX);
+        oa.cmp(&ob)
+    });
+    for me in &snapshot.entries {
+        let order = snapshot.order.get(&me.id).copied();
+        let previous = snapshot.previous_order.get(&me.id).copied();
+        let placement_changed = matches!((order, previous), (Some(o), Some(p)) if o != p);
+        let moved_up = matches!((order, previous), (Some(o), Some(p)) if o < p);
+        let elapsed = runners
+            .iter()
+            .find(|r| r.id == me.id)
+            .map_or(0.0, |r| r.accumulate_time.t);
+
+        let mut near_behind = false;
+        let mut near_behind_set1 = false;
+        let mut near_infront = false;
+        let mut side_blocked = false;
+        let mut has_target = false;
+        let mut is_target = false;
+        for other in snapshot.entries.iter().filter(|e| e.id != me.id) {
+            let along = other.position - me.position;
+            let across = (other.current_lane - me.current_lane).abs();
+            if along < 0.0 && -along <= NEAR_LANE_METERS && across <= NEAR_LANE_LANES * horse_lane {
+                near_behind = true;
+            }
+            if along < 0.0
+                && -along <= NEAR_LANE_SET1_METERS
+                && across <= NEAR_LANE_SET1_LANES * horse_lane
+            {
+                near_behind_set1 = true;
+            }
+            if along > 0.0 && along <= NEAR_LANE_METERS && across <= NEAR_LANE_LANES * horse_lane {
+                near_infront = true;
+            }
+            if along.abs() <= SIDE_BLOCK_METERS
+                && across <= SIDE_BLOCK_LANES * horse_lane
+                && across >= SIDE_BLOCK_LANE_EPSILON
+            {
+                side_blocked = true;
+            }
+            if is_overtake_target(me, other) {
+                has_target = true;
+            }
+            if is_overtake_target(other, me) {
+                is_target = true;
+            }
+        }
+        let behind_is_inner = order
+            .and_then(|o| {
+                by_order
+                    .iter()
+                    .find(|e| snapshot.order.get(&e.id) == Some(&(o + 1)))
+            })
+            .is_some_and(|behind| behind.current_lane < me.current_lane);
+
+        let t = tracker.condition_timers.entry(me.id).or_default();
+        let step = |held: bool, value: f64| if held { value + dt } else { 0.0 };
+        t.near_behind = if placement_changed {
+            0.0
+        } else {
+            step(near_behind, t.near_behind)
+        };
+        t.near_behind_set1 = if placement_changed {
+            0.0
+        } else {
+            step(near_behind_set1, t.near_behind_set1)
+        };
+        t.near_infront = if placement_changed {
+            0.0
+        } else {
+            step(near_infront, t.near_infront)
+        };
+        t.blocked_front = step(me.is_front_blocked, t.blocked_front);
+        t.blocked_side = step(side_blocked, t.blocked_side);
+        t.blocked_all = step(me.is_front_blocked && side_blocked, t.blocked_all);
+        t.overtake_target_no_order_up = if moved_up {
+            0.0
+        } else {
+            step(has_target, t.overtake_target_no_order_up)
+        };
+        t.overtaken = step(is_target, t.overtaken);
+        t.has_overtake_target = has_target;
+        t.behind_is_inner = behind_is_inner;
+        if let Some(o) = order {
+            if elapsed > ORDER_CONTINUE_GRACE_SECONDS {
+                for (i, thr) in thresholds.iter().enumerate() {
+                    t.in_band[i] &= o <= *thr;
+                    t.out_band[i] &= o > *thr;
+                }
+            }
+        }
+        snapshot.condition_timers.insert(me.id, *t);
     }
 }
 
@@ -276,6 +430,7 @@ pub fn build_field_view(
         self_previous_order: snapshot.previous_order.get(&self_id).copied(),
         num_umas: snapshot.num_total,
         leader_position: snapshot.leader_position,
+        condition_timers: snapshot.condition_timers.get(&self_id).copied(),
         is_front_blocked,
         other_snapshots,
         active_runners,
@@ -455,6 +610,7 @@ mod tests {
             pacer_strategy: None,
             second_place_position: None,
             leader_position: None,
+            condition_timers: HashMap::new(),
         }
     }
 
@@ -631,5 +787,122 @@ mod tests {
         let mut gates = assign_gates(&[None; 9], 9, &mut rng);
         gates.sort_unstable();
         assert_eq!(gates, (0..9).collect::<Vec<i64>>());
+    }
+
+    // --- condition timers (GameTora's skill-condition viewer, 23 Sep 2026) ---
+
+    const DT: f64 = 1.0 / 15.0;
+    const LANE: f64 = 1.5;
+
+    /// A two-runner field: `a` at 100 m, `b` behind it by `gap` metres and
+    /// `lanes` lanes, with placements `order_a` / `order_b` this frame and the
+    /// given previous placements.
+    fn pair(gap: f64, lanes: f64, now: (i64, i64), before: (i64, i64)) -> FieldSnapshot {
+        let mut a = entry(1, 100.0, Strategy::FrontRunner);
+        let mut b = entry(2, 100.0 - gap, Strategy::PaceChaser);
+        b.current_lane = lanes * LANE;
+        a.current_lane = 0.0;
+        let mut snap = snapshot(vec![a, b]);
+        snap.order.insert(RunnerId(1), now.0);
+        snap.order.insert(RunnerId(2), now.1);
+        snap.previous_order.insert(RunnerId(1), before.0);
+        snap.previous_order.insert(RunnerId(2), before.1);
+        snap
+    }
+
+    fn tick(snap: &mut FieldSnapshot, tracker: &mut FieldOrderTracker) -> ConditionTimers {
+        update_condition_timers(snap, tracker, &[], DT, LANE);
+        snap.condition_timers[&RunnerId(1)]
+    }
+
+    #[test]
+    fn near_behind_counts_seconds_held_not_the_race_clock() {
+        // 2 m behind, same lane: right behind by GameTora's 2.5 m / 1 lane.
+        let mut tracker = FieldOrderTracker::new();
+        let mut t = ConditionTimers::default();
+        for _ in 0..30 {
+            t = tick(&mut pair(2.0, 0.0, (1, 2), (1, 2)), &mut tracker);
+        }
+        assert!(
+            (t.near_behind - 2.0).abs() < 1e-9,
+            "30 frames = 2 s, got {}",
+            t.near_behind
+        );
+        // Out of range (3 m) for one frame: back to zero.
+        t = tick(&mut pair(3.0, 0.0, (1, 2), (1, 2)), &mut tracker);
+        assert_eq!(t.near_behind, 0.0);
+        // But within the set1 window (5 m, 2.7 lanes).
+        assert!(t.near_behind_set1 > 2.0);
+    }
+
+    #[test]
+    fn near_lane_timers_reset_when_the_runners_own_placement_changes() {
+        let mut tracker = FieldOrderTracker::new();
+        for _ in 0..30 {
+            tick(&mut pair(2.0, 0.0, (1, 2), (1, 2)), &mut tracker);
+        }
+        let t = tick(&mut pair(2.0, 0.0, (1, 2), (2, 1)), &mut tracker);
+        assert_eq!(t.near_behind, 0.0);
+        assert_eq!(t.near_behind_set1, 0.0);
+    }
+
+    #[test]
+    fn near_behind_needs_the_same_lane() {
+        let mut tracker = FieldOrderTracker::new();
+        let t = tick(&mut pair(2.0, 1.5, (1, 2), (1, 2)), &mut tracker);
+        assert_eq!(t.near_behind, 0.0, "1.5 lanes is outside the 1-lane window");
+        assert!(t.near_behind_set1 > 0.0, "but inside set1's 2.7 lanes");
+    }
+
+    #[test]
+    fn is_behind_in_reads_the_runner_directly_behind() {
+        let mut tracker = FieldOrderTracker::new();
+        // b behind a, on a lane closer to the fence than a.
+        let mut snap = pair(4.0, 0.0, (1, 2), (1, 2));
+        snap.entries[0].current_lane = 3.0;
+        snap.entries[1].current_lane = 1.0;
+        assert!(tick(&mut snap, &mut tracker).behind_is_inner);
+        let mut snap = pair(4.0, 0.0, (1, 2), (1, 2));
+        snap.entries[0].current_lane = 1.0;
+        snap.entries[1].current_lane = 3.0;
+        assert!(!tick(&mut snap, &mut tracker).behind_is_inner);
+    }
+
+    #[test]
+    fn overtake_target_is_up_to_20_m_ahead_and_caught_within_15_s() {
+        let mut tracker = FieldOrderTracker::new();
+        // b 10 m behind a and 1 m/s faster: catches in 10 s, a is b's target.
+        let mut snap = pair(10.0, 0.0, (1, 2), (1, 2));
+        snap.entries[1].current_speed = 21.0;
+        update_condition_timers(&mut snap, &mut tracker, &[], DT, LANE);
+        assert!(snap.condition_timers[&RunnerId(2)].has_overtake_target);
+        assert!(snap.condition_timers[&RunnerId(1)].overtaken > 0.0);
+        // 0.5 m/s faster: 20 s to catch, no target.
+        let mut snap = pair(10.0, 0.0, (1, 2), (1, 2));
+        snap.entries[1].current_speed = 20.5;
+        update_condition_timers(&mut snap, &mut tracker, &[], DT, LANE);
+        assert!(!snap.condition_timers[&RunnerId(2)].has_overtake_target);
+        // 25 m ahead: out of range however fast.
+        let mut snap = pair(25.0, 0.0, (1, 2), (1, 2));
+        snap.entries[1].current_speed = 30.0;
+        update_condition_timers(&mut snap, &mut tracker, &[], DT, LANE);
+        assert!(!snap.condition_timers[&RunnerId(2)].has_overtake_target);
+    }
+
+    #[test]
+    fn overtake_target_timer_resets_on_moving_up_a_place() {
+        let mut tracker = FieldOrderTracker::new();
+        for _ in 0..30 {
+            let mut snap = pair(10.0, 0.0, (1, 2), (1, 2));
+            snap.entries[1].current_speed = 21.0;
+            update_condition_timers(&mut snap, &mut tracker, &[], DT, LANE);
+        }
+        let mut snap = pair(10.0, 0.0, (2, 1), (1, 2));
+        snap.entries[1].current_speed = 21.0;
+        update_condition_timers(&mut snap, &mut tracker, &[], DT, LANE);
+        assert_eq!(
+            snap.condition_timers[&RunnerId(2)].overtake_target_no_order_up,
+            0.0
+        );
     }
 }

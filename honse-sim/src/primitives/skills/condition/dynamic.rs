@@ -27,6 +27,85 @@ pub struct RunnerSnapshot {
     pub current_speed: f64,
 }
 
+/// Per-runner condition state the live field keeps frame by frame, for the
+/// conditions whose value depends on history rather than on this tick alone.
+/// Definitions follow GameTora's skill-condition viewer (read 23 Sep 2026):
+///
+/// * `near_behind` / `near_infront`: seconds with at least one uma no more than
+///   2.5 m behind / ahead and no more than 1 lane (1/18 of the course width, the
+///   engine's `horse_lane`) to either side; any uma counts, but the timer resets
+///   whenever the runner's own placement changes.
+/// * `near_behind_set1`: the same with 5 m and 2.7 lanes.
+/// * `blocked_front` / `blocked_side` / `blocked_all`: seconds blocked in front,
+///   on at least one side, and both at once, continuously.
+/// * `overtake_target_no_order_up`: seconds with at least one overtake target
+///   (an uma up to 20 m ahead that the runner catches within 15 s at the current
+///   speeds), reset when the runner moves up a place.
+/// * `overtaken`: seconds the runner has been someone else's overtake target.
+/// * `has_overtake_target`: this tick, by the same definition.
+/// * `behind_is_inner`: the uma directly behind in placement runs closer to the
+///   inner fence.
+/// * `in_band` / `out_band`: whether the runner has stayed within / outside the
+///   top 20, 40, 50, 70 and 80 % (placement against `round(n * rate)`, as the
+///   plain `order_rate`) at every tick after the first 5 s.
+#[derive(Debug, Clone, Copy)]
+pub struct ConditionTimers {
+    /// Seconds with an uma right behind (2.5 m, 1 lane).
+    pub near_behind: f64,
+    /// Seconds with an uma behind (5 m, 2.7 lanes).
+    pub near_behind_set1: f64,
+    /// Seconds with an uma right ahead (2.5 m, 1 lane).
+    pub near_infront: f64,
+    /// Seconds blocked in front, continuously.
+    pub blocked_front: f64,
+    /// Seconds blocked on at least one side, continuously.
+    pub blocked_side: f64,
+    /// Seconds blocked in front and on a side at once, continuously.
+    pub blocked_all: f64,
+    /// Seconds with an overtake target, reset on moving up a place.
+    pub overtake_target_no_order_up: f64,
+    /// Seconds as someone's overtake target, continuously.
+    pub overtaken: f64,
+    /// Whether the runner has an overtake target this tick.
+    pub has_overtake_target: bool,
+    /// Whether the uma directly behind runs closer to the inner fence.
+    pub behind_is_inner: bool,
+    /// Still within the top 20/40/50/70/80 % since 5 s.
+    pub in_band: [bool; 5],
+    /// Still outside the top 20/40/50/70/80 % since 5 s.
+    pub out_band: [bool; 5],
+}
+
+impl Default for ConditionTimers {
+    fn default() -> Self {
+        Self {
+            near_behind: 0.0,
+            near_behind_set1: 0.0,
+            near_infront: 0.0,
+            blocked_front: 0.0,
+            blocked_side: 0.0,
+            blocked_all: 0.0,
+            overtake_target_no_order_up: 0.0,
+            overtaken: 0.0,
+            has_overtake_target: false,
+            behind_is_inner: false,
+            in_band: [true; 5],
+            out_band: [true; 5],
+        }
+    }
+}
+
+/// The order-rate bands the `order_rate_{in,out}NN_continue` conditions use,
+/// in the order of [`ConditionTimers::in_band`] / [`ConditionTimers::out_band`].
+pub const ORDER_RATE_BANDS: [f64; 5] = [0.2, 0.4, 0.5, 0.7, 0.8];
+
+/// Index of `rate` in [`ORDER_RATE_BANDS`].
+pub fn order_rate_band_index(rate: f64) -> Option<usize> {
+    ORDER_RATE_BANDS
+        .iter()
+        .position(|b| (b - rate).abs() < 1e-9)
+}
+
 /// Live state of an active (non-finished) runner, used by the state conditions
 /// (temptation / dueling counts). Includes the observing runner itself, flagged
 /// via [`is_self`](ActiveRunner::is_self) so `includeSelf=false` predicates can
@@ -210,6 +289,12 @@ pub trait RunnerView {
     }
     /// The leader's (order-1) position in meters, if known.
     fn leader_position(&self) -> Option<f64> {
+        None
+    }
+    /// The live field's per-runner condition timers and latches, if a live
+    /// field keeps them (the contested engine does; `None` elsewhere, where the
+    /// conditions keep their older instantaneous reading).
+    fn condition_timers(&self) -> Option<ConditionTimers> {
         None
     }
     /// Snapshots of every other active runner (excludes self).

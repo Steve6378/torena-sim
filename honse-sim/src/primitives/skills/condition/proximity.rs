@@ -88,7 +88,18 @@ fn has_near_lane_runner(runner: &dyn RunnerView, direction: Direction) -> bool {
     })
 }
 
+/// Seconds with an uma right behind / ahead. On the live field this is the
+/// [`ConditionTimers`](crate::skills::condition::dynamic::ConditionTimers)
+/// duration (GameTora: 2.5 m and 1 lane, reset when the runner's own placement
+/// changes). Without one, the older proxy: the whole race clock while someone
+/// is near, which makes `>= 3` true on the first near tick after 3 s.
 fn near_lane_time(runner: &dyn RunnerView, direction: Direction) -> f64 {
+    if let Some(t) = runner.condition_timers() {
+        return match direction {
+            Direction::Behind => t.near_behind,
+            Direction::Infront => t.near_infront,
+        };
+    }
     if has_near_lane_runner(runner, direction) {
         runner.accumulate_time()
     } else {
@@ -176,9 +187,14 @@ pub fn register_proximity_conditions() {
             compare(near_lane_time(r, Direction::Behind), arg as f64, cmp)
         })
     });
+    // GameTora: like behind_near_lane_time with 5 m and 2.7 lanes.
     register_dynamic_condition("behind_near_lane_time_set1", |arg, cmp| {
         DynamicCondition::new(move |r| {
-            compare(near_lane_time(r, Direction::Behind), arg as f64, cmp)
+            let secs = match r.condition_timers() {
+                Some(t) => t.near_behind_set1,
+                None => near_lane_time(r, Direction::Behind),
+            };
+            compare(secs, arg as f64, cmp)
         })
     });
     register_dynamic_condition("infront_near_lane_time", |arg, cmp| {

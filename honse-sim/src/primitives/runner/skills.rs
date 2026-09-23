@@ -46,6 +46,8 @@ pub struct FieldView {
     pub num_umas: i64,
     /// The leader's position in meters, if known.
     pub leader_position: Option<f64>,
+    /// This runner's condition timers and latches (live field only).
+    pub condition_timers: Option<crate::skills::condition::dynamic::ConditionTimers>,
     /// Whether a runner blocks this one in front this tick (mechanics § Front
     /// Blocking). The field producer resolves it with the same predicate the
     /// physics step's speed cap reads, so the `blocked_front*` token conditions
@@ -167,6 +169,9 @@ impl RunnerView for RunnerConditionView<'_> {
     }
     fn leader_position(&self) -> Option<f64> {
         self.field.leader_position
+    }
+    fn condition_timers(&self) -> Option<crate::skills::condition::dynamic::ConditionTimers> {
+        self.field.condition_timers
     }
     fn other_snapshots(&self) -> Vec<DynRunnerSnapshot> {
         self.field.other_snapshots.clone()

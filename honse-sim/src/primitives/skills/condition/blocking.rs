@@ -70,8 +70,12 @@ fn is_overtaking_runner(runner: &dyn RunnerView) -> bool {
     })
 }
 
-/// The "continuous time" proxy: while `predicate` holds, the runner's elapsed
-/// race time is compared against `arg`; otherwise zero is compared.
+/// The "continuous time" proxy for a runner without a live field: while
+/// `predicate` holds, the runner's elapsed race time is compared against `arg`;
+/// otherwise zero. On the live field the conditions read
+/// [`ConditionTimers`](crate::skills::condition::dynamic::ConditionTimers)
+/// instead -- how long the state has actually held -- because this proxy makes
+/// `...time >= 2` true on the first tick the state holds anywhere after 2 s.
 fn continuous_time(runner: &dyn RunnerView, active: bool) -> f64 {
     if active {
         runner.accumulate_time()
@@ -88,7 +92,11 @@ pub fn register_blocking_conditions() {
 
     register_dynamic_condition("blocked_front_continuetime", |arg, cmp| {
         DynamicCondition::new(move |r| {
-            compare(continuous_time(r, r.is_front_blocked()), arg as f64, cmp)
+            let secs = match r.condition_timers() {
+                Some(t) => t.blocked_front,
+                None => continuous_time(r, r.is_front_blocked()),
+            };
+            compare(secs, arg as f64, cmp)
         })
     });
 
@@ -97,7 +105,11 @@ pub fn register_blocking_conditions() {
             // "Blocked on all sides" means blocked in front and on at least
             // one side (mechanics § Side Blocking), not on both flanks.
             let active = r.is_front_blocked() && has_side_blocking_runner(r);
-            compare(continuous_time(r, active), arg as f64, cmp)
+            let secs = match r.condition_timers() {
+                Some(t) => t.blocked_all,
+                None => continuous_time(r, active),
+            };
+            compare(secs, arg as f64, cmp)
         })
     });
 
@@ -113,16 +125,25 @@ pub fn register_blocking_conditions() {
 
     register_dynamic_condition("blocked_side_continuetime", |arg, cmp| {
         DynamicCondition::new(move |r| {
-            compare(
-                continuous_time(r, has_side_blocking_runner(r)),
-                arg as f64,
-                cmp,
-            )
+            let secs = match r.condition_timers() {
+                Some(t) => t.blocked_side,
+                None => continuous_time(r, has_side_blocking_runner(r)),
+            };
+            compare(secs, arg as f64, cmp)
         })
     });
 
+    // GameTora: an overtake target is an uma up to 20 m ahead that the runner
+    // catches within 15 s at the current speeds. The live field resolves it;
+    // without one, the older 5 m proxy stands.
     register_dynamic_condition("is_overtake", |arg, cmp| {
-        DynamicCondition::new(move |r| compare(bool_num(is_overtaking_runner(r)), arg as f64, cmp))
+        DynamicCondition::new(move |r| {
+            let has = match r.condition_timers() {
+                Some(t) => t.has_overtake_target,
+                None => is_overtaking_runner(r),
+            };
+            compare(bool_num(has), arg as f64, cmp)
+        })
     });
 
     register_dynamic_condition("is_move_lane", |arg, cmp| {
@@ -132,15 +153,26 @@ pub fn register_blocking_conditions() {
         })
     });
 
+    // GameTora: seconds the runner has been someone else's overtake target.
     register_dynamic_condition("overtake_target_time", |arg, cmp| {
         DynamicCondition::new(move |r| {
-            compare(continuous_time(r, is_overtaking_runner(r)), arg as f64, cmp)
+            let secs = match r.condition_timers() {
+                Some(t) => t.overtaken,
+                None => continuous_time(r, is_overtaking_runner(r)),
+            };
+            compare(secs, arg as f64, cmp)
         })
     });
 
+    // GameTora: seconds the runner has had an overtake target; the name says the
+    // time runs while she has not moved up a place, so a pass resets it.
     register_dynamic_condition("overtake_target_no_order_up_time", |arg, cmp| {
         DynamicCondition::new(move |r| {
-            compare(continuous_time(r, is_overtaking_runner(r)), arg as f64, cmp)
+            let secs = match r.condition_timers() {
+                Some(t) => t.overtake_target_no_order_up,
+                None => continuous_time(r, is_overtaking_runner(r)),
+            };
+            compare(secs, arg as f64, cmp)
         })
     });
 }
