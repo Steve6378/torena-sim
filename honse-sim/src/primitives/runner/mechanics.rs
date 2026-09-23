@@ -21,8 +21,14 @@ mod conserve_power {
     /// The conserved-power gauge threshold required to release Fully Charged.
     ///
     /// The source docs say "if there is enough conserved power" but do not name a
-    /// concrete value. 100.0 is a local assumption/tuning point.
-    pub(super) const FULLY_CHARGED_THRESHOLD: f64 = 100.0;
+    /// concrete value; v0.13.0 assumed 100. The recordings refute any threshold
+    /// that bites: of the 117 tournament races (sim-lab engine-fork captures),
+    /// every runner over the power gate released (a ReleaseConservePower event,
+    /// 87 of 88 above an effective 1200) at every distance from 1200 m to 3200 m,
+    /// while 100 held the engine to 40.6 % of runners against 68.5 % recorded.
+    /// So the gauge still runs (its rushed / spot-struggle history feeds the
+    /// release strength) but no longer gates the release.
+    pub(super) const FULLY_CHARGED_THRESHOLD: f64 = 0.0;
     /// Gauge gain per 1.5s check while position keep is Pace Down.
     pub(super) const PACE_DOWN_GAIN: f64 = 6.7;
     /// Gauge gain per 1.5s check while position keep is Normal/None.
@@ -161,7 +167,13 @@ impl Runner {
     /// Initialize the Power Conservation / Fully Charged state.
     pub(crate) fn initialize_power_conservation(&mut self, distance_type: DistanceType) {
         self.is_fully_charged = false;
-        self.conserve_power_stat = f64::from(self.stats.power);
+        // The effective power stat -- mood, ground and the gate skills already
+        // applied (this runs after `activate_gate_skills`) -- not the raw one:
+        // on the recordings the 1200 gate splits runners by mood-adjusted power
+        // (above it 87 of 88 release, at or just under it about a third, the
+        // ones a power skill lifts), where raw power left every Great-mood
+        // runner between 1154 and 1200 out.
+        self.conserve_power_stat = self.adjusted_stats.power;
         self.conserved_power = 0.0;
         self.last_conserve_power_check_frame = 0;
         self.conserve_power_saw_rushed = false;
@@ -1102,17 +1114,21 @@ mod tests {
     }
 
     #[test]
-    fn fully_charged_requires_eligibility_and_threshold() {
+    fn fully_charged_requires_power_over_the_gate_but_no_gauge() {
+        // At or under the effective-power gate: no release, however full.
         let mut r = test_runner(0, Strategy::PaceChaser);
         r.conserve_power_stat = 1200.0;
         r.conserved_power = 100.0;
         r.begin_fully_charged();
         assert!(!r.is_fully_charged);
 
+        // Over it: the release comes even from an empty gauge (the recordings:
+        // every runner over the gate released, at every distance).
+        let mut r = test_runner(0, Strategy::PaceChaser);
         r.conserve_power_stat = 1300.0;
-        r.conserved_power = 99.9;
+        r.conserved_power = 0.0;
         r.begin_fully_charged();
-        assert!(!r.is_fully_charged);
+        assert!(r.is_fully_charged);
     }
 
     #[test]
