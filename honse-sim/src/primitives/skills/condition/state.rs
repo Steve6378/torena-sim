@@ -9,8 +9,6 @@ use crate::skills::condition::dynamic::{
     bool_num, compare, register_dynamic_condition, ActiveRunner, DynamicCondition, RunnerView,
 };
 
-const POPULARITY_ONE_GATE: i64 = 0;
-
 /// Count active rushed runners matching `predicate`, optionally including self.
 fn count_active_rushed(
     runner: &dyn RunnerView,
@@ -37,6 +35,11 @@ fn own_showdown_count(runner: &dyn RunnerView) -> i64 {
         .map_or(0, |me| i64::from(me.is_dueling || me.has_dueled))
 }
 
+/// GameTora: "your running strategy is the same as the strategy of the most
+/// popular girl in the race". v0.13.0 took the runner in the first gate for
+/// her: on the 117 recordings 200292 fired for 13 of 13 carriers sharing the
+/// popularity-one runner's style and 0 of 10 others, while the first gate's
+/// style splits them 9 of 11 and 4 of 12.
 fn has_same_style_as_popularity_one(runner: &dyn RunnerView) -> bool {
     let Some(self_strategy) = runner.strategy() else {
         return false;
@@ -44,7 +47,7 @@ fn has_same_style_as_popularity_one(runner: &dyn RunnerView) -> bool {
     runner
         .active_runners()
         .iter()
-        .find(|other| other.gate == POPULARITY_ONE_GATE)
+        .find(|other| other.popularity == 1)
         .is_some_and(|popularity_one| strategy_matches(self_strategy, popularity_one.strategy))
 }
 
@@ -136,14 +139,14 @@ pub fn register_state_conditions() {
         DynamicCondition::new(move |r| compare(bool_num(r.is_rushed()), arg as f64, cmp))
     });
 
+    // GameTora: "the number of times you've been rushing during the race" --
+    // her own spells, past ones included. v0.13.0 counted the runners rushed
+    // across the field at this tick, so a runner rushed in the Mid-Race still
+    // met `temptation_count==0` in the Late-Race, where nobody is rushed: on
+    // the 117 recordings carriers of skills gated on it fired 0 of 44 times
+    // after a rush of their own, against 142 of 384 never rushed.
     register_dynamic_condition("temptation_count", |arg, cmp| {
-        DynamicCondition::new(move |r| {
-            compare(
-                count_active_rushed(r, true, |_| true) as f64,
-                arg as f64,
-                cmp,
-            )
-        })
+        DynamicCondition::new(move |r| compare(r.temptation_count() as f64, arg as f64, cmp))
     });
 
     register_dynamic_condition("temptation_count_behind", |arg, cmp| {
@@ -246,6 +249,7 @@ mod tests {
     struct TestRunner {
         position: f64,
         is_rushed: bool,
+        temptation_count: i64,
         strategy: Option<Strategy>,
         runners: Vec<ActiveRunner>,
     }
@@ -255,6 +259,7 @@ mod tests {
             TestRunner {
                 position: 0.0,
                 is_rushed: false,
+                temptation_count: 0,
                 strategy: Some(Strategy::FrontRunner),
                 runners: Vec::new(),
             }
@@ -267,6 +272,9 @@ mod tests {
         }
         fn is_rushed(&self) -> bool {
             self.is_rushed
+        }
+        fn temptation_count(&self) -> i64 {
+            self.temptation_count
         }
         fn strategy(&self) -> Option<Strategy> {
             self.strategy
@@ -292,6 +300,7 @@ mod tests {
             is_dueling: false,
             has_dueled: false,
             activated_advantage_effect_types: 0,
+            popularity: 0,
         }
     }
 
@@ -310,20 +319,25 @@ mod tests {
     }
 
     #[test]
-    fn temptation_count_includes_self() {
+    fn temptation_count_is_the_runners_own_spells() {
         register_state_conditions();
-        let factory = get_dynamic_condition("temptation_count").expect("registered");
-        let cond = factory(2, CmpKind::Gte);
-
-        let runner = TestRunner {
+        let never = get_dynamic_condition("temptation_count").expect("registered")(0, CmpKind::Eq);
+        // Rivals rushed right now do not count.
+        let watching = TestRunner {
             runners: vec![
-                rival(true, 100.0, Strategy::FrontRunner, 0, true),
+                rival(true, 100.0, Strategy::FrontRunner, 0, false),
                 rival(false, 90.0, Strategy::PaceChaser, 1, true),
-                rival(false, 80.0, Strategy::LateSurger, 2, false),
             ],
             ..Default::default()
         };
-        assert!(cond.eval(&runner)); // 2 rushed
+        assert!(never.eval(&watching));
+        // Her own spell counts after it is over, with nobody rushed now.
+        let rushed_before = TestRunner {
+            temptation_count: 1,
+            runners: vec![rival(true, 100.0, Strategy::FrontRunner, 0, false)],
+            ..Default::default()
+        };
+        assert!(!never.eval(&rushed_before));
     }
 
     #[test]
@@ -392,24 +406,40 @@ mod tests {
     }
 
     #[test]
-    fn equal_popularity_one_compares_with_gate_zero_runner() {
+    fn equal_popularity_one_compares_with_the_most_popular_runner() {
         register_state_conditions();
         let factory =
             get_dynamic_condition("running_style_equal_popularity_one").expect("registered");
         let cond = factory(1, CmpKind::Eq);
+        // The first gate holds a late surger; the favourite, in gate 5, a pace
+        // chaser.
+        let field = |favourite: Strategy| {
+            let first_gate = rival(false, 95.0, Strategy::LateSurger, 0, false);
+            let mut popularity_one = rival(false, 90.0, favourite, 4, false);
+            popularity_one.popularity = 1;
+            vec![first_gate, popularity_one]
+        };
 
         let same = TestRunner {
             strategy: Some(Strategy::PaceChaser),
-            runners: vec![rival(false, 90.0, Strategy::PaceChaser, 0, false)],
+            runners: field(Strategy::PaceChaser),
             ..Default::default()
         };
         assert!(cond.eval(&same));
 
         let different = TestRunner {
-            strategy: Some(Strategy::PaceChaser),
-            runners: vec![rival(false, 90.0, Strategy::LateSurger, 0, false)],
+            strategy: Some(Strategy::LateSurger),
+            runners: field(Strategy::PaceChaser),
             ..Default::default()
         };
         assert!(!cond.eval(&different));
+
+        // A runaway favourite is a front runner's style-mate.
+        let runaway = TestRunner {
+            strategy: Some(Strategy::FrontRunner),
+            runners: field(Strategy::Runaway),
+            ..Default::default()
+        };
+        assert!(cond.eval(&runaway));
     }
 }

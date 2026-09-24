@@ -47,6 +47,8 @@ pub struct FieldView {
     pub num_umas: i64,
     /// The leader's position in meters, if known.
     pub leader_position: Option<f64>,
+    /// The rearmost active runner's position in meters, if known.
+    pub last_position: Option<f64>,
     /// This runner's condition timers and latches (live field only).
     pub condition_timers: Option<crate::skills::condition::dynamic::ConditionTimers>,
     /// Whether a runner blocks this one in front this tick (mechanics § Front
@@ -81,6 +83,9 @@ impl RunnerView for RunnerConditionView<'_> {
     }
     fn skills_activated_count(&self) -> i64 {
         self.runner.skills_activated_count
+    }
+    fn recent_skill_activations(&self) -> i64 {
+        self.runner.skills_activated_count - self.runner.activations_at_last_tick_start
     }
     fn skills_activated_in_phase(&self, phase: usize) -> i64 {
         self.runner
@@ -135,6 +140,9 @@ impl RunnerView for RunnerConditionView<'_> {
     fn lane_change_speed(&self) -> f64 {
         self.runner.lane_change_speed
     }
+    fn lane_move_outward(&self) -> bool {
+        self.runner.lane_move_outward
+    }
     fn horse_lane(&self) -> f64 {
         self.runner.horse_lane
     }
@@ -153,6 +161,9 @@ impl RunnerView for RunnerConditionView<'_> {
     fn is_rushed(&self) -> bool {
         self.runner.is_rushed
     }
+    fn temptation_count(&self) -> i64 {
+        self.runner.rushed_activations.len() as i64
+    }
     fn is_dueling(&self) -> bool {
         self.runner.is_dueling
     }
@@ -170,6 +181,9 @@ impl RunnerView for RunnerConditionView<'_> {
     }
     fn leader_position(&self) -> Option<f64> {
         self.field.leader_position
+    }
+    fn last_position(&self) -> Option<f64> {
+        self.field.last_position
     }
     fn condition_timers(&self) -> Option<crate::skills::condition::dynamic::ConditionTimers> {
         self.field.condition_timers
@@ -378,6 +392,8 @@ impl Runner {
         self.targeted_change_lane_skills_active.clear();
 
         self.skills_activated_count = 0;
+        self.activations_at_tick_start = 0;
+        self.activations_at_last_tick_start = 0;
         self.skills_activated_phase_map = [0; 4];
         self.skills_activated_half_race_map = [0; 2];
         self.heals_activated_count = 0;
@@ -577,6 +593,8 @@ impl Runner {
 
     /// Process self-skill activations for this tick.
     pub(crate) fn process_skill_activations(&mut self, field: &FieldView, course_distance: f64) {
+        self.activations_at_last_tick_start = self.activations_at_tick_start;
+        self.activations_at_tick_start = self.skills_activated_count;
         self.cleanup_expired_self_skills();
         self.activation_distance_from_top = field
             .leader_position
@@ -613,12 +631,15 @@ impl Runner {
             }
         }
 
-        let mut i = self.pending_skills.len();
-        while i > 0 {
-            i -= 1;
-            if i >= self.pending_skills.len() {
-                continue;
-            }
+        // Skills are checked in ascending id order (the pending list is built
+        // from the id-sorted skills): a lower-id skill can trigger a higher-id
+        // one on the same tick, not the reverse (mechanics doc §
+        // activate_count_x; the recordings, 15 of 15 is_activate_any_skill
+        // activations). A removal leaves `next` on the entry that moves up.
+        let mut next = 0;
+        while next < self.pending_skills.len() {
+            let i = next;
+            next += 1;
             let (trigger, skill_id, forced) = {
                 let s = &self.pending_skills[i];
                 (s.trigger, s.skill_id.0.clone(), s.forced)
@@ -637,6 +658,7 @@ impl Runner {
             if self.position >= trigger.end || removal {
                 self.pending_skills.remove(i);
                 self.pending_skill_removal.remove(&skill_id);
+                next = i;
                 continue;
             }
 
@@ -682,6 +704,7 @@ impl Runner {
                 }
                 if i < self.pending_skills.len() {
                     self.pending_skills.remove(i);
+                    next = i;
                 }
             }
         }
@@ -1999,6 +2022,81 @@ mod tests {
         assert_eq!(r.skills_activated_count, 1);
         assert!(r.used_skills.contains("100001"));
         assert!(r.pending_skills.is_empty());
+    }
+
+    /// `is_activate_any_skill`: another skill "has just been activated", on
+    /// this tick or the last, not at any time before.
+    #[test]
+    fn is_activate_any_skill_reads_an_activation_on_this_tick_or_the_last() {
+        // An early skill fires in the Mid-Race; 120011 waits in the Late-Race
+        // for another activation; `other`, if given, fires on entering it.
+        let fire = |other: Option<&str>| {
+            let mut skills = vec![
+                target_speed_skill("100001", SkillRarity::Gold, "phase>=1"),
+                target_speed_skill(
+                    "120011",
+                    SkillRarity::Unique,
+                    "phase>=2&is_activate_any_skill==1",
+                ),
+            ];
+            if let Some(id) = other {
+                skills.push(target_speed_skill(id, SkillRarity::White, "phase>=2"));
+            }
+            let mut r = runner_with_skills(skills);
+            prepare(&mut r);
+            r.wit_checks_enabled = false;
+            let late = r
+                .pending_skills
+                .iter()
+                .find(|p| p.skill_id.0 == "120011")
+                .expect("pending")
+                .trigger
+                .start;
+            r.position = r.pending_skills[0].trigger.start + 1.0;
+            r.process_skill_activations(&FieldView::at_gate(), 2400.0);
+            assert_eq!(r.skills_activated_count, 1, "the early skill");
+            // A tick later, still in the Mid-Race.
+            r.position += 1.0;
+            r.process_skill_activations(&FieldView::at_gate(), 2400.0);
+            let mut ticks = Vec::new();
+            for tick in 0..3 {
+                r.position = late + 1.0 + f64::from(tick);
+                r.process_skill_activations(&FieldView::at_gate(), 2400.0);
+                if r.used_skills.contains("120011") {
+                    ticks.push(tick);
+                }
+            }
+            ticks.first().copied()
+        };
+        // The early activation is two ticks old: it never fires.
+        assert_eq!(fire(None), None);
+        // Another skill fires on entering the Late-Race. The pass checks skills
+        // in ascending id order (mechanics doc § activate_count_x): a lower id
+        // fires first and 120011 follows on the same tick; a higher id fires
+        // after 120011 was checked, so 120011 follows on the next.
+        assert_eq!(fire(Some("110001")), Some(0), "a lower id");
+        assert_eq!(fire(Some("200331")), Some(1), "a higher id");
+    }
+
+    /// `temptation_count` is the runner's own rushed spells, past ones
+    /// included, whoever else is rushed.
+    #[test]
+    fn temptation_count_reads_the_runners_own_spells() {
+        let fires = |spells: Vec<(f64, f64)>| {
+            let mut r = runner_with_skills(vec![target_speed_skill(
+                "900591",
+                SkillRarity::Gold,
+                "phase>=2&temptation_count==0",
+            )]);
+            prepare(&mut r);
+            r.wit_checks_enabled = false;
+            r.rushed_activations = spells;
+            activate_first(&mut r, &FieldView::at_gate());
+            r.used_skills.contains("900591")
+        };
+        assert!(fires(Vec::new()));
+        // A spell in the Mid-Race, long over.
+        assert!(!fires(vec![(700.0, 900.0)]));
     }
 
     /// Activation duration (seconds) of a target-speed skill carrying

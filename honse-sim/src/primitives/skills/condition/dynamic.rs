@@ -48,6 +48,11 @@ pub struct RunnerSnapshot {
 /// * `in_band` / `out_band`: whether the runner has stayed within / outside the
 ///   top 20, 40, 50, 70 and 80 % (placement against `round(n * rate)`, as the
 ///   plain `order_rate`) at every tick after the first 5 s.
+/// * `order_up_middle` / `order_up_end_after` / `order_up_finalcorner_after`:
+///   how many times the runner has overtaken someone during the Mid-Race,
+///   since entering the Late-Race, and since entering the final corner; a
+///   runner passed is one ahead of her on the previous tick and behind her on
+///   this one.
 #[derive(Debug, Clone, Copy)]
 pub struct ConditionTimers {
     /// Seconds with an uma right behind (2.5 m, 1 lane).
@@ -74,6 +79,12 @@ pub struct ConditionTimers {
     pub in_band: [bool; 5],
     /// Still outside the top 20/40/50/70/80 % since 5 s.
     pub out_band: [bool; 5],
+    /// Runners passed during the Mid-Race.
+    pub order_up_middle: i64,
+    /// Runners passed since entering the Late-Race.
+    pub order_up_end_after: i64,
+    /// Runners passed since entering the final corner.
+    pub order_up_finalcorner_after: i64,
 }
 
 impl Default for ConditionTimers {
@@ -91,6 +102,9 @@ impl Default for ConditionTimers {
             behind_is_inner: false,
             in_band: [true; 5],
             out_band: [true; 5],
+            order_up_middle: 0,
+            order_up_end_after: 0,
+            order_up_finalcorner_after: 0,
         }
     }
 }
@@ -118,8 +132,10 @@ pub struct ActiveRunner {
     pub position: f64,
     /// Running style.
     pub strategy: Strategy,
-    /// Gate (post) number; gate `0` marks the popularity-one runner.
+    /// Gate (post) number, 0-based.
     pub gate: i64,
+    /// Popularity rank (1 = most popular; `0` = unknown).
+    pub popularity: i64,
     /// Whether the runner is currently rushed (temptation).
     pub is_rushed: bool,
     /// Whether the runner is currently in a duel.
@@ -176,6 +192,10 @@ pub trait RunnerView {
     }
     /// Total number of skills activated so far.
     fn skills_activated_count(&self) -> i64 {
+        0
+    }
+    /// Skills activated on this tick so far and on the previous tick.
+    fn recent_skill_activations(&self) -> i64 {
         0
     }
     /// Number of skills activated during the given phase index (0..=2).
@@ -242,6 +262,11 @@ pub trait RunnerView {
     fn lane_change_speed(&self) -> f64 {
         0.0
     }
+    /// Whether the lane move [`lane_change_speed`](RunnerView::lane_change_speed)
+    /// describes is away from the inner fence.
+    fn lane_move_outward(&self) -> bool {
+        false
+    }
     /// The course's per-horse lane width (`course.horseLane`).
     fn horse_lane(&self) -> f64 {
         0.0
@@ -265,6 +290,11 @@ pub trait RunnerView {
     /// Whether the runner is currently rushed (temptation).
     fn is_rushed(&self) -> bool {
         false
+    }
+    /// How many times the runner has been rushed so far this race. Without a
+    /// race history, the current spell only.
+    fn temptation_count(&self) -> i64 {
+        i64::from(self.is_rushed())
     }
     /// Whether the runner is currently dueling.
     fn is_dueling(&self) -> bool {
@@ -291,6 +321,10 @@ pub trait RunnerView {
     }
     /// The leader's (order-1) position in meters, if known.
     fn leader_position(&self) -> Option<f64> {
+        None
+    }
+    /// The rearmost active runner's position in meters, if known.
+    fn last_position(&self) -> Option<f64> {
         None
     }
     /// The live field's per-runner condition timers and latches, if a live

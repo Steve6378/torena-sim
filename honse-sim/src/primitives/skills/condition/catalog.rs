@@ -12,7 +12,7 @@
 //! - `dynamic_or_static`-wrapped conditions that defer to the dynamic registry
 //!   (populated by t-009) in normal mode, falling back to a static approximation.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::course::phase::{
@@ -22,7 +22,7 @@ use crate::shared_kernel::language::{strategy_matches, DistanceType, Phase, Stra
 use crate::shared_kernel::region::{Region, RegionList};
 use crate::skills::activation::ActivationSamplePolicy;
 use crate::skills::condition::dynamic::{
-    get_dynamic_condition, register_all_dynamic_conditions, DynamicCondition,
+    compare, get_dynamic_condition, register_all_dynamic_conditions, DynamicCondition,
 };
 use crate::skills::condition::operator::CmpKind;
 use crate::skills::condition::{
@@ -1372,7 +1372,19 @@ pub fn build_catalog() -> ConditionCatalog {
             })
             .build(),
     );
-    add("lane_type", noop_immediate());
+    // GameTora: the lane the runner is in, in course widths: inner (0) <= 0.2 <
+    // middle (1) <= 0.4 < outer (2) <= 0.6 < outside (3). v0.13.0 ignored it.
+    add(
+        "lane_type",
+        immediate()
+            .eq(|p| Ok(lane_type_filter(p, CmpKind::Eq)))
+            .neq(|p| Ok(lane_type_filter(p, CmpKind::Neq)))
+            .lt(|p| Ok(lane_type_filter(p, CmpKind::Lt)))
+            .lte(|p| Ok(lane_type_filter(p, CmpKind::Lte)))
+            .gt(|p| Ok(lane_type_filter(p, CmpKind::Gt)))
+            .gte(|p| Ok(lane_type_filter(p, CmpKind::Gte)))
+            .build(),
+    );
     add(
         "lastspurt",
         immediate()
@@ -1547,44 +1559,18 @@ pub fn build_catalog() -> ConditionCatalog {
             }
         }),
     );
+    // GameTora: the starting gate *block*, which holds several gates in a big
+    // field. The field size is the race's, since gate skills are read before
+    // the field view exists.
     add(
         "post_number",
         immediate()
-            .eq(|p| {
-                let post = p.arg;
-                Ok((
-                    p.regions.clone(),
-                    Some(DynamicCondition::new(move |r| gate_block(r.gate()) == post)),
-                ))
-            })
-            .lte(|p| {
-                let post = p.arg;
-                Ok((
-                    p.regions.clone(),
-                    Some(DynamicCondition::new(move |r| gate_block(r.gate()) <= post)),
-                ))
-            })
-            .gte(|p| {
-                let post = p.arg;
-                Ok((
-                    p.regions.clone(),
-                    Some(DynamicCondition::new(move |r| gate_block(r.gate()) >= post)),
-                ))
-            })
-            .lt(|p| {
-                let post = p.arg;
-                Ok((
-                    p.regions.clone(),
-                    Some(DynamicCondition::new(move |r| gate_block(r.gate()) < post)),
-                ))
-            })
-            .gt(|p| {
-                let post = p.arg;
-                Ok((
-                    p.regions.clone(),
-                    Some(DynamicCondition::new(move |r| gate_block(r.gate()) > post)),
-                ))
-            })
+            .eq(|p| Ok(post_number_filter(p, CmpKind::Eq)))
+            .neq(|p| Ok(post_number_filter(p, CmpKind::Neq)))
+            .lt(|p| Ok(post_number_filter(p, CmpKind::Lt)))
+            .lte(|p| Ok(post_number_filter(p, CmpKind::Lte)))
+            .gt(|p| Ok(post_number_filter(p, CmpKind::Gt)))
+            .gte(|p| Ok(post_number_filter(p, CmpKind::Gte)))
             .build(),
     );
     add(
@@ -1666,22 +1652,27 @@ pub fn build_catalog() -> ConditionCatalog {
             })
             .build(),
     );
+    // GameTora: the runners sharing your running style, you included, as a
+    // count and as a percentage of the field. The game has one style for
+    // front runners and runaways, so they count together. v0.13.0 keyed on the
+    // exact strategy and returned the rate as a fraction against a percentage
+    // argument, so `running_style_count_same_rate>=40` never held: on the 117
+    // recordings 200282 fired for 39 of 39 carriers at 40% or more counted
+    // this way and 0 of 18 below.
     add(
         "running_style_count_same",
         value_filter_or_noop(|p| {
             let counts = p.extra.strategy_counts.as_ref()?;
-            Some(f64::from(
-                counts.get(&p.runner.strategy).copied().unwrap_or(0),
-            ))
+            Some(f64::from(same_style_count(counts, p.runner.strategy)))
         }),
     );
     add(
         "running_style_count_same_rate",
         value_filter_or_noop(|p| {
             let counts = p.extra.strategy_counts.as_ref()?;
-            let num = p.extra.num_umas?;
-            let same = counts.get(&p.runner.strategy).copied().unwrap_or(0);
-            Some(f64::from(same) / f64::from(num))
+            let num = p.extra.num_umas.filter(|&n| n > 0)?;
+            let same = same_style_count(counts, p.runner.strategy);
+            Some(f64::from(same) * 100.0 / f64::from(num))
         }),
     );
     // `running_style_count_<style>_otherself` counts how many *other* runners in
@@ -1931,6 +1922,10 @@ pub fn build_catalog() -> ConditionCatalog {
     add("remain_distance_viewer_id", noop_immediate());
 
     // --- newly supported condition tokens (parity with TS conditions.ts) ---
+    // GameTora: another skill "has just been activated". v0.13.0 read "has
+    // ever activated one", so the skill fired at the start of its window. On
+    // the 117 recordings all 15 activations of 120011/920011 came on the tick
+    // of another of the runner's activations or on the next one.
     add(
         "is_activate_any_skill",
         immediate()
@@ -1940,7 +1935,7 @@ pub fn build_catalog() -> ConditionCatalog {
                 }
                 Ok((
                     p.regions.clone(),
-                    Some(DynamicCondition::new(|r| r.skills_activated_count() > 0)),
+                    Some(DynamicCondition::new(|r| r.recent_skill_activations() > 0)),
                 ))
             })
             .build(),
@@ -2141,13 +2136,88 @@ pub fn build_catalog() -> ConditionCatalog {
     m
 }
 
-/// `gate_block`: collapse a gate number into its post-number block.
-fn gate_block(gate: i64) -> i64 {
-    if gate < 9 {
-        gate
+/// `gate_block`: the starting-gate block of the 0-based `gate` in a field of
+/// `n` runners (JRA brackets): one gate per block up to 8 runners; with 9 to
+/// 16 the first `16 - n` blocks hold one gate and the rest two; 17 runners
+/// put three in block 8, 18 three in blocks 7 and 8. v0.13.0 mapped the 0-based gate as if
+/// it were the number, so the 12-runner field read blocks 0-8, 8, 7, 6
+/// instead of 1-4, 5, 5, 6, 6, 7, 7, 8, 8: on the 117 recordings the JRA
+/// blocks predict every carrier of 200252 (7 of 7 fired, 0 of 16) and 200262
+/// (59 of 59, 0 of 56).
+fn gate_block(gate: i64, n: i64) -> i64 {
+    let g = gate + 1;
+    if n <= 8 {
+        g
+    } else if n <= 16 {
+        let singles = 16 - n;
+        if g <= singles {
+            g
+        } else {
+            singles + 1 + (g - singles - 1) / 2
+        }
+    } else if n == 17 {
+        if g <= 14 {
+            (g + 1) / 2
+        } else {
+            8
+        }
+    } else if g <= 12 {
+        (g + 1) / 2
+    } else if g <= 15 {
+        7
     } else {
-        1 + ((24 - gate) % 8)
+        8
     }
+}
+
+/// `post_number` against the runner's gate block, in the race's field (or
+/// the live one when the race's size is unknown).
+fn post_number_filter(p: &ConditionFilterParams<'_>, cmp: CmpKind) -> ConditionResult {
+    let post = p.arg;
+    let field = p.extra.num_umas.map_or(0, i64::from);
+    (
+        p.regions.clone(),
+        Some(DynamicCondition::new(move |r| {
+            let n = if field > 0 { field } else { r.num_umas() };
+            compare(gate_block(r.gate(), n) as f64, post as f64, cmp)
+        })),
+    )
+}
+
+/// `lane_type` against the runner's lane in course widths (a course without a
+/// width keeps v0.13.0's always-true reading).
+fn lane_type_filter(p: &ConditionFilterParams<'_>, cmp: CmpKind) -> ConditionResult {
+    let arg = p.arg;
+    let width = p.course.course_width;
+    (
+        p.regions.clone(),
+        Some(DynamicCondition::new(move |r| {
+            if width <= 0.0 {
+                return true;
+            }
+            let widths = r.current_lane() / width;
+            let lane_type = if widths <= 0.2 {
+                0
+            } else if widths <= 0.4 {
+                1
+            } else if widths <= 0.6 {
+                2
+            } else {
+                3
+            };
+            compare(f64::from(lane_type), arg as f64, cmp)
+        })),
+    )
+}
+
+/// Runners in `counts` sharing `strategy`'s running style (a runaway is a
+/// front runner).
+fn same_style_count(counts: &HashMap<Strategy, u32>, strategy: Strategy) -> u32 {
+    counts
+        .iter()
+        .filter(|(s, _)| strategy_matches(**s, strategy))
+        .map(|(_, n)| n)
+        .sum()
 }
 
 fn activate_count_phase(phase_index: usize) -> Arc<dyn Condition> {
@@ -2806,6 +2876,134 @@ mod tests {
             Strategy::FrontRunner,
             &[(Strategy::FrontRunner, 1), (Strategy::PaceChaser, 8)]
         ));
+    }
+
+    #[test]
+    fn running_style_count_same_is_a_percentage_with_runaways_as_front_runners() {
+        // Nine runners: 3 front runners, 1 runaway, 5 pace chasers.
+        let field = [
+            (Strategy::FrontRunner, 3),
+            (Strategy::Runaway, 1),
+            (Strategy::PaceChaser, 5),
+        ];
+        // A front runner or the runaway shares her style with 4 of 9 (44 %).
+        for style in [Strategy::FrontRunner, Strategy::Runaway] {
+            assert!(apply_otherself(
+                "running_style_count_same_rate>=40",
+                style,
+                &field
+            ));
+            assert!(!apply_otherself(
+                "running_style_count_same_rate>=45",
+                style,
+                &field
+            ));
+            assert!(apply_otherself(
+                "running_style_count_same==4",
+                style,
+                &field
+            ));
+        }
+        // The pace chasers: 5 of 9 (56 %).
+        assert!(apply_otherself(
+            "running_style_count_same_rate>=50",
+            Strategy::PaceChaser,
+            &field
+        ));
+        assert!(!apply_otherself(
+            "running_style_count_same_rate>=60",
+            Strategy::PaceChaser,
+            &field
+        ));
+    }
+
+    /// A runner at a gate and a lane, for the gate and lane tokens.
+    #[derive(Default)]
+    struct PlacedRunner {
+        gate: i64,
+        lane: f64,
+    }
+    impl RunnerView for PlacedRunner {
+        fn gate(&self) -> i64 {
+            self.gate
+        }
+        fn current_lane(&self) -> f64 {
+            self.lane
+        }
+    }
+
+    /// Whether `condition` holds for `view` in a field of `num_umas`: its
+    /// regions survive and its runtime gate, if any, passes.
+    fn holds(condition: &str, num_umas: u32, view: &dyn RunnerView) -> bool {
+        let catalog = build_catalog();
+        let parser = ConditionParser::new(&catalog);
+        let op = parser.parse(condition).expect("parse");
+        let course = course();
+        let eval = runner();
+        let mut extra = params();
+        extra.num_umas = Some(num_umas);
+        let (regions, cond) = op
+            .apply(&ApplyParams {
+                regions: whole_course(&course),
+                course: &course,
+                runner: &eval,
+                extra: &extra,
+                resolution: ConditionResolution::Dynamic,
+            })
+            .expect("apply");
+        !regions.0.is_empty() && cond.is_none_or(|c| c.eval(view))
+    }
+
+    #[test]
+    fn post_number_reads_the_gate_block_in_the_races_field() {
+        // 12 runners: gates 1-4 are blocks 1-4, then two gates to a block.
+        let at = |gate| PlacedRunner {
+            gate,
+            ..Default::default()
+        };
+        assert!(holds("post_number<=3", 12, &at(2)));
+        assert!(!holds("post_number<=3", 12, &at(3)));
+        assert!(holds("post_number==7", 12, &at(8)));
+        assert!(holds("post_number==7", 12, &at(9)));
+        assert!(!holds("post_number==7", 12, &at(10)));
+        assert!(holds("post_number>=6", 12, &at(6)));
+        assert!(!holds("post_number>=6", 12, &at(5)));
+    }
+
+    #[test]
+    fn gate_blocks_follow_the_jra_brackets() {
+        let blocks = |n: i64| (0..n).map(|g| gate_block(g, n)).collect::<Vec<_>>();
+        assert_eq!(blocks(8), vec![1, 2, 3, 4, 5, 6, 7, 8]);
+        assert_eq!(blocks(9), vec![1, 2, 3, 4, 5, 6, 7, 8, 8]);
+        assert_eq!(blocks(12), vec![1, 2, 3, 4, 5, 5, 6, 6, 7, 7, 8, 8]);
+        assert_eq!(
+            blocks(16),
+            vec![1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8]
+        );
+        assert_eq!(
+            blocks(17),
+            vec![1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 8]
+        );
+        assert_eq!(
+            blocks(18),
+            vec![1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 7, 8, 8, 8]
+        );
+    }
+
+    #[test]
+    fn lane_type_reads_the_lane_in_course_widths() {
+        // The test course is 30 m wide: inner to 6 m, middle to 12 m, outer
+        // to 18 m, outside beyond.
+        let at = |lane| PlacedRunner {
+            lane,
+            ..Default::default()
+        };
+        assert!(holds("lane_type==0", 9, &at(5.0)));
+        assert!(!holds("lane_type==0", 9, &at(7.0)));
+        assert!(holds("lane_type==1", 9, &at(7.0)));
+        assert!(holds("lane_type>=2", 9, &at(15.0)));
+        assert!(!holds("lane_type>=2", 9, &at(11.0)));
+        assert!(holds("lane_type==3", 9, &at(20.0)));
     }
 
     #[test]

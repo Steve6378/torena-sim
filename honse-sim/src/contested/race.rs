@@ -18,7 +18,7 @@ use uma_sim_primitives::position_keep::{update_position_keep_coefficient, Positi
 use uma_sim_primitives::race_support::{
     assign_gates, build_field_snapshot, build_field_view, front_blocking_runner,
     has_side_blocking_runner, is_overtaking_runner, proximity_snapshots, resolve_debuff_targets,
-    update_condition_timers, FieldOrderTracker, FieldSnapshot,
+    update_condition_timers, FieldOrderTracker, FieldSnapshot, OrderUpWindows,
 };
 use uma_sim_primitives::runner::lifecycle::{CreateRunner, PrepareContext};
 use uma_sim_primitives::runner::physics::{
@@ -262,6 +262,7 @@ impl Race {
         self.finished_runners.clear();
         self.finish_marks.clear();
         self.order_tracker.reset();
+        self.order_tracker.order_up_windows = Some(OrderUpWindows::for_course(&self.course));
         self.spot_struggle_unlocked = false;
         self.spot_struggle_triggered.clear();
 

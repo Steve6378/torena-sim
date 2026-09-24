@@ -573,6 +573,7 @@ impl Runner {
             self.lane_change_speed = (self.lane_change_speed
                 + course.lane_change_acceleration_per_frame)
                 .min(target_speed);
+            self.lane_move_outward = self.target_lane > current_lane;
 
             let lane_skill_bonus: f64 = self
                 .lane_movement_skills_active
@@ -688,6 +689,7 @@ impl Runner {
         }
         self.lane_change_speed =
             (self.lane_change_speed + course.lane_change_acceleration_per_frame).min(target_speed);
+        self.lane_move_outward = self.target_lane > current_lane;
 
         let me = LaneSelf {
             id: self.id,
@@ -794,6 +796,7 @@ impl Runner {
         self.current_lane = initial_lane;
         self.target_lane = initial_lane;
         self.lane_change_speed = 0.0;
+        self.lane_move_outward = false;
         self.extra_move_lane = -1.0;
         self.force_in_speed = 0.0;
         self.is_side_blocked = false;

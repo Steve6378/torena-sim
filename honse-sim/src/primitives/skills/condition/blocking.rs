@@ -146,10 +146,19 @@ pub fn register_blocking_conditions() {
         })
     });
 
+    // GameTora: 1 = just moved toward the inner fence, 2 = away from it.
+    // v0.13.0 read any move as 1, so `is_move_lane==2` never held. Every
+    // carried skill takes either direction, so their rates do not move.
     register_dynamic_condition("is_move_lane", |arg, cmp| {
         DynamicCondition::new(move |r| {
-            let is_moving_lane = r.lane_change_speed().abs() > MOVING_LANE_EPSILON;
-            compare(bool_num(is_moving_lane), arg as f64, cmp)
+            let direction = if r.lane_change_speed().abs() <= MOVING_LANE_EPSILON {
+                0.0
+            } else if r.lane_move_outward() {
+                2.0
+            } else {
+                1.0
+            };
+            compare(direction, arg as f64, cmp)
         })
     });
 
@@ -192,6 +201,7 @@ mod tests {
         current_lane: f64,
         current_speed: f64,
         lane_change_speed: f64,
+        lane_move_outward: bool,
         accumulate_time: f64,
         is_front_blocked: bool,
         snapshots: Vec<RunnerSnapshot>,
@@ -209,6 +219,9 @@ mod tests {
         }
         fn lane_change_speed(&self) -> f64 {
             self.lane_change_speed
+        }
+        fn lane_move_outward(&self) -> bool {
+            self.lane_move_outward
         }
         fn horse_lane(&self) -> f64 {
             1.0
@@ -232,6 +245,7 @@ mod tests {
                 is_dueling: false,
                 has_dueled: false,
                 activated_advantage_effect_types: 0,
+                popularity: 0,
             }]
         }
     }
@@ -450,19 +464,33 @@ mod tests {
     }
 
     #[test]
-    fn is_move_lane_tracks_lane_change_speed() {
+    fn is_move_lane_reads_the_direction_of_the_move() {
         register_blocking_conditions();
         let factory = get_dynamic_condition("is_move_lane").expect("registered");
-        let cond = factory(1, CmpKind::Eq);
+        let inward = factory(1, CmpKind::Eq);
+        let outward = factory(2, CmpKind::Eq);
 
-        let moving = TestRunner {
+        let moving_in = TestRunner {
             lane_change_speed: 0.5,
             ..Default::default()
         };
-        assert!(cond.eval(&moving));
+        assert!(inward.eval(&moving_in));
+        assert!(!outward.eval(&moving_in));
 
-        let still = TestRunner::default();
-        assert!(!cond.eval(&still));
+        let moving_out = TestRunner {
+            lane_change_speed: 0.5,
+            lane_move_outward: true,
+            ..Default::default()
+        };
+        assert!(outward.eval(&moving_out));
+        assert!(!inward.eval(&moving_out));
+
+        let still = TestRunner {
+            lane_move_outward: true,
+            ..Default::default()
+        };
+        assert!(!inward.eval(&still));
+        assert!(!outward.eval(&still));
     }
 
     #[test]

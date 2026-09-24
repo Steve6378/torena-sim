@@ -11,7 +11,16 @@ use crate::skills::condition::dynamic::{
 const NEAR_DISTANCE_METERS: f64 = 3.0;
 const BASHIN_METERS: f64 = 2.5;
 const NEAR_COUNT_LANE_MULTIPLIER: f64 = 3.0;
-const SURROUNDED_LANE_MULTIPLIER: f64 = 1.0;
+/// `is_surrounded` (mechanics § is_surrounded): a runner in front
+/// (`0 < DistanceGap < 3 m`), one behind (`-3 m < DistanceGap < 0`), each
+/// under 1.5 lanes across, and one outside (`abs(DistanceGap) < 1.5 m`,
+/// `0 < LaneGap < 3` lanes).
+const SURROUNDED_METERS: f64 = 3.0;
+const SURROUNDED_LANE_MULTIPLIER: f64 = 1.5;
+const SURROUNDED_OUT_METERS: f64 = 1.5;
+const SURROUNDED_OUT_LANE_MULTIPLIER: f64 = 3.0;
+/// Lanes closer than this are the same lane.
+const SAME_LANE_EPSILON: f64 = 0.00001;
 const NEAR_LANE_TIME_LANE_MULTIPLIER: f64 = 1.0;
 const VISIBLE_DISTANCE_METERS: f64 = 20.0;
 const VISIBLE_LANE_MULTIPLIER: f64 = 11.5;
@@ -141,24 +150,26 @@ pub fn register_proximity_conditions() {
         })
     });
 
+    // v0.13.0 read 1 lane in front and behind, up to 3 m inclusive, and had no
+    // outside clause. One runner can meet two clauses (passing on the lane
+    // outside), so two can surround.
     register_dynamic_condition("is_surrounded", |arg, cmp| {
         DynamicCondition::new(move |r| {
-            let threshold = lane_threshold(r, SURROUNDED_LANE_MULTIPLIER);
-            let mut ahead = false;
-            let mut behind = false;
+            let lanes = lane_threshold(r, SURROUNDED_LANE_MULTIPLIER);
+            let out_lanes = lane_threshold(r, SURROUNDED_OUT_LANE_MULTIPLIER);
+            let (mut front, mut behind, mut out) = (false, false, false);
             for snapshot in r.other_snapshots() {
-                if !within_distance(r, &snapshot, NEAR_DISTANCE_METERS)
-                    || !within_lane(r, &snapshot, threshold)
-                {
-                    continue;
+                let distance_gap = snapshot.position - r.position();
+                let lane_gap = snapshot.current_lane - r.current_lane();
+                if lane_gap.abs() < lanes {
+                    front |= distance_gap > 0.0 && distance_gap < SURROUNDED_METERS;
+                    behind |= distance_gap < 0.0 && distance_gap > -SURROUNDED_METERS;
                 }
-                if is_ahead_of(r, &snapshot) {
-                    ahead = true;
-                } else if is_behind_of(r, &snapshot) {
-                    behind = true;
-                }
+                out |= distance_gap.abs() < SURROUNDED_OUT_METERS
+                    && lane_gap >= SAME_LANE_EPSILON
+                    && lane_gap < out_lanes;
             }
-            compare(bool_num(ahead && behind), arg as f64, cmp)
+            compare(bool_num(front && behind && out), arg as f64, cmp)
         })
     });
 
@@ -282,24 +293,45 @@ mod tests {
     }
 
     #[test]
-    fn is_surrounded_requires_both_sides() {
+    fn is_surrounded_needs_a_runner_in_front_behind_and_outside() {
         register_proximity_conditions();
         let factory = get_dynamic_condition("is_surrounded").expect("registered");
         let cond = factory(1, CmpKind::Eq);
-
-        let surrounded = TestRunner {
+        // She runs 2 lanes off the fence.
+        let field = |snapshots: Vec<RunnerSnapshot>| TestRunner {
             position: 100.0,
-            snapshots: vec![snap(102.0, 0.0), snap(98.0, 0.0)],
+            current_lane: 2.0,
+            snapshots,
             ..Default::default()
         };
-        assert!(cond.eval(&surrounded));
 
-        let only_ahead = TestRunner {
-            position: 100.0,
-            snapshots: vec![snap(102.0, 0.0)],
-            ..Default::default()
-        };
-        assert!(!cond.eval(&only_ahead));
+        // In front and behind in her lane, nobody outside: not surrounded.
+        assert!(!cond.eval(&field(vec![snap(102.0, 2.0), snap(98.0, 2.0)])));
+        // With a runner outside, two lanes out: surrounded.
+        assert!(cond.eval(&field(vec![
+            snap(102.0, 2.0),
+            snap(98.0, 2.0),
+            snap(100.5, 4.0)
+        ])));
+        // 1.2 lanes across still counts in front and behind (under 1.5).
+        assert!(cond.eval(&field(vec![
+            snap(102.0, 3.2),
+            snap(98.0, 0.8),
+            snap(100.5, 4.0)
+        ])));
+        // The runner outside must be under 1.5 m along, under 3 lanes out,
+        // and out, not in.
+        for beside in [snap(101.6, 4.0), snap(100.5, 5.0), snap(100.5, 1.0)] {
+            assert!(!cond.eval(&field(vec![snap(102.0, 2.0), snap(98.0, 2.0), beside])));
+        }
+        // 3 m exactly is not in front.
+        assert!(!cond.eval(&field(vec![
+            snap(103.0, 2.0),
+            snap(98.0, 2.0),
+            snap(100.5, 4.0)
+        ])));
+        // One runner passing on the next lane out is both in front and outside.
+        assert!(cond.eval(&field(vec![snap(101.0, 3.0), snap(98.0, 2.0)])));
     }
 
     #[test]

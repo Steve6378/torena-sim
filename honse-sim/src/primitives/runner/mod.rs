@@ -250,6 +250,9 @@ pub struct Runner {
     pub extra_move_lane: f64,
     /// Current lane-change speed.
     pub lane_change_speed: f64,
+    /// Whether the lane move `lane_change_speed` describes is away from the
+    /// inner fence (`is_move_lane` 2) rather than toward it (1).
+    pub lane_move_outward: bool,
     /// Whether a runner is blocking this runner's side this tick (telemetry).
     pub is_side_blocked: bool,
     /// Runner blocking this one in front this tick, if known.
@@ -448,6 +451,12 @@ pub struct Runner {
     // --- skill activation tracking ---
     /// Total skills activated this round.
     pub skills_activated_count: i64,
+    /// `skills_activated_count` when this tick's activation pass began.
+    pub activations_at_tick_start: i64,
+    /// `skills_activated_count` when the previous tick's activation pass
+    /// began: activations above it came on this tick or the last
+    /// (`is_activate_any_skill`).
+    pub activations_at_last_tick_start: i64,
     /// Skills activated per phase index (Early/Mid/Late/LastSpurt).
     pub skills_activated_phase_map: [i64; 4],
     /// Skills activated per half-race (first/second).

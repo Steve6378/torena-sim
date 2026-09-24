@@ -11,12 +11,14 @@
 
 use std::collections::HashMap;
 
+use crate::course::model::CourseData;
+use crate::course::phase::phase_start;
 use crate::pacing::{select_pacer, PacerBranch};
 use crate::runner::physics::{FrontBlock, RunnerSnapshot};
 use crate::runner::skills::FieldView;
 use crate::runner::Runner;
 use crate::shared_kernel::ids::RunnerId;
-use crate::shared_kernel::language::{strategy_matches, Strategy};
+use crate::shared_kernel::language::{strategy_matches, Phase, Strategy};
 use crate::shared_kernel::rng::Prng;
 use crate::skills::condition::dynamic::{
     ActiveRunner, ConditionTimers, RunnerSnapshot as DynRunnerSnapshot, ORDER_RATE_BANDS,
@@ -41,6 +43,8 @@ pub struct FieldSnapshot {
     pub second_place_position: Option<f64>,
     /// Position of the furthest-forward runner.
     pub leader_position: Option<f64>,
+    /// Position of the furthest-back active runner.
+    pub last_position: Option<f64>,
     /// Number of active runners.
     pub num_active: i64,
     /// Total field size (finished + active). Used as `num_umas` for order
@@ -78,6 +82,32 @@ pub struct SnapEntry {
     pub has_dueled: bool,
     /// Bitmask of positive self-applied effect types activated so far.
     pub activated_advantage_effect_types: u64,
+    /// Popularity rank (1 = most popular; `0` = unknown).
+    pub popularity: i64,
+}
+
+/// Where on the course the `change_order_up_*` counters count passes: the
+/// Mid-Race `[D/6, 2D/3)`, the Late-Race from 2D/3, and the final corner from
+/// its start. A pass counts where the runner is at the end of the tick.
+#[derive(Debug, Clone, Copy)]
+pub struct OrderUpWindows {
+    /// Start of the Mid-Race.
+    pub middle_start: f64,
+    /// Start of the Late-Race (the Mid-Race ends here).
+    pub late_start: f64,
+    /// Start of the final corner; `None` on a course without corners.
+    pub final_corner_start: Option<f64>,
+}
+
+impl OrderUpWindows {
+    /// The windows of `course`.
+    pub fn for_course(course: &CourseData) -> Self {
+        Self {
+            middle_start: phase_start(course.distance, Phase::MidRace),
+            late_start: phase_start(course.distance, Phase::LateRace),
+            final_corner_start: course.corners.last().map(|c| c.start),
+        }
+    }
 }
 
 /// The aggregate's running pacer + finishing-order state, threaded across frames.
@@ -99,6 +129,9 @@ pub struct FieldOrderTracker {
     pub previous_runner_order: HashMap<RunnerId, i64>,
     /// Per-runner condition timers and latches, carried across frames.
     pub condition_timers: HashMap<RunnerId, ConditionTimers>,
+    /// The course windows the `change_order_up_*` counters count in, set by
+    /// the race for its course; `None` counts nothing.
+    pub order_up_windows: Option<OrderUpWindows>,
 }
 
 impl FieldOrderTracker {
@@ -176,6 +209,7 @@ pub fn build_field_snapshot(
             is_dueling: r.is_dueling,
             has_dueled: r.has_dueled,
             activated_advantage_effect_types: r.activated_advantage_effect_types,
+            popularity: r.popularity,
         })
         .collect();
 
@@ -215,6 +249,7 @@ pub fn build_field_snapshot(
 
     let leader_position = sorted.first().map(|e| e.position);
     let second_place_position = sorted.get(1).map(|e| e.position);
+    let last_position = sorted.last().map(|e| e.position);
 
     let num_active = entries.len() as i64;
     FieldSnapshot {
@@ -228,6 +263,7 @@ pub fn build_field_snapshot(
         pacer_strategy,
         second_place_position,
         leader_position,
+        last_position,
         condition_timers: HashMap::new(),
     }
 }
@@ -294,6 +330,21 @@ pub fn update_condition_timers(
             .iter()
             .find(|r| r.id == me.id)
             .map_or(0.0, |r| r.accumulate_time.t);
+        // Runners she passed this tick: ahead of her on the previous tick's
+        // order, behind her on this one.
+        let passed = match (order, previous) {
+            (Some(o), Some(p)) => snapshot
+                .entries
+                .iter()
+                .filter(|e| {
+                    matches!(
+                        (snapshot.order.get(&e.id), snapshot.previous_order.get(&e.id)),
+                        (Some(&eo), Some(&ep)) if ep < p && eo > o
+                    )
+                })
+                .count() as i64,
+            _ => 0,
+        };
 
         let mut near_behind = false;
         let mut near_behind_set1 = false;
@@ -365,6 +416,19 @@ pub fn update_condition_timers(
         t.overtaken = step(is_target, t.overtaken);
         t.has_overtake_target = has_target;
         t.behind_is_inner = behind_is_inner;
+        if let (true, Some(w)) = (passed > 0, tracker.order_up_windows) {
+            if (w.middle_start..w.late_start).contains(&me.position) {
+                t.order_up_middle += passed;
+            }
+            if me.position >= w.late_start {
+                t.order_up_end_after += passed;
+            }
+            if w.final_corner_start
+                .is_some_and(|start| me.position >= start)
+            {
+                t.order_up_finalcorner_after += passed;
+            }
+        }
         if let Some(o) = order {
             if elapsed > ORDER_CONTINUE_GRACE_SECONDS {
                 for (i, thr) in thresholds.iter().enumerate() {
@@ -427,6 +491,7 @@ pub fn build_field_view(
             is_dueling: e.is_dueling,
             has_dueled: e.has_dueled,
             activated_advantage_effect_types: e.activated_advantage_effect_types,
+            popularity: e.popularity,
         })
         .collect();
     FieldView {
@@ -434,6 +499,7 @@ pub fn build_field_view(
         self_previous_order: snapshot.previous_order.get(&self_id).copied(),
         num_umas: snapshot.num_total,
         leader_position: snapshot.leader_position,
+        last_position: snapshot.last_position,
         condition_timers: snapshot.condition_timers.get(&self_id).copied(),
         is_front_blocked,
         other_snapshots,
@@ -600,6 +666,7 @@ mod tests {
             is_dueling: false,
             has_dueled: false,
             activated_advantage_effect_types: 0,
+            popularity: 0,
         }
     }
 
@@ -615,6 +682,7 @@ mod tests {
             pacer_strategy: None,
             second_place_position: None,
             leader_position: None,
+            last_position: None,
             condition_timers: HashMap::new(),
         }
     }
@@ -892,6 +960,85 @@ mod tests {
         snap.entries[1].current_speed = 30.0;
         update_condition_timers(&mut snap, &mut tracker, &[], DT, LANE);
         assert!(!snap.condition_timers[&RunnerId(2)].has_overtake_target);
+    }
+
+    /// Runners passed, counted where the passer is: the Mid-Race `[D/6, 2D/3)`,
+    /// the Late-Race from 2D/3, the final corner from its start (a 2400 m
+    /// course with its final corner at 1800 m).
+    #[test]
+    fn order_up_counters_count_runners_passed_in_their_windows() {
+        let mut tracker = FieldOrderTracker::new();
+        tracker.order_up_windows = Some(OrderUpWindows {
+            middle_start: 400.0,
+            late_start: 1600.0,
+            final_corner_start: Some(1800.0),
+        });
+        // Runner 1 at `at` goes from 3rd to 1st past runners 2 and 3.
+        let pass_two = |tracker: &mut FieldOrderTracker, at: f64| {
+            let mut snap = snapshot(vec![
+                entry(1, at, Strategy::LateSurger),
+                entry(2, at - 1.0, Strategy::FrontRunner),
+                entry(3, at - 2.0, Strategy::PaceChaser),
+            ]);
+            for (id, now, before) in [(1, 1, 3), (2, 2, 1), (3, 3, 2)] {
+                snap.order.insert(RunnerId(id), now);
+                snap.previous_order.insert(RunnerId(id), before);
+            }
+            update_condition_timers(&mut snap, tracker, &[], DT, LANE);
+            let t = snap.condition_timers[&RunnerId(1)];
+            (
+                t.order_up_middle,
+                t.order_up_end_after,
+                t.order_up_finalcorner_after,
+            )
+        };
+        assert_eq!(pass_two(&mut tracker, 300.0), (0, 0, 0), "early race");
+        assert_eq!(pass_two(&mut tracker, 1000.0), (2, 0, 0));
+        assert_eq!(pass_two(&mut tracker, 1700.0), (2, 2, 0));
+        assert_eq!(pass_two(&mut tracker, 1900.0), (2, 4, 2));
+        // Being passed counts nothing for the runners she passed.
+        let t = tracker.condition_timers[&RunnerId(2)];
+        assert_eq!(t.order_up_middle + t.order_up_end_after, 0);
+
+        // Without the course windows nothing is counted.
+        let mut tracker = FieldOrderTracker::new();
+        assert_eq!(pass_two(&mut tracker, 1900.0), (0, 0, 0));
+    }
+
+    /// The snapshot keeps the rearmost runner's position and every runner's
+    /// popularity for the conditions that read them.
+    #[test]
+    fn the_field_view_carries_the_last_position_and_popularity() {
+        use crate::runner::test_support::test_runner;
+
+        let mut runners: Vec<Runner> = [
+            (0_u32, Strategy::PaceChaser),
+            (1, Strategy::FrontRunner),
+            (2, Strategy::LateSurger),
+        ]
+        .into_iter()
+        .map(|(id, strategy)| {
+            let mut r = test_runner(id, strategy);
+            r.gate = i64::from(id);
+            r.popularity = i64::from(3 - id);
+            r
+        })
+        .collect();
+        runners[0].position = 120.0;
+        runners[1].position = 150.0;
+        runners[2].position = 90.0;
+        let mut tracker = FieldOrderTracker::new();
+        let snap = build_field_snapshot(&runners, &[], &mut tracker);
+        assert_eq!(snap.leader_position, Some(150.0));
+        assert_eq!(snap.last_position, Some(90.0));
+        let view = build_field_view(RunnerId(0), &snap, false);
+        assert_eq!(view.last_position, Some(90.0));
+        let favourite = view
+            .active_runners
+            .iter()
+            .find(|a| a.popularity == 1)
+            .expect("popularity carried");
+        assert_eq!(favourite.strategy, Strategy::LateSurger);
     }
 
     #[test]
