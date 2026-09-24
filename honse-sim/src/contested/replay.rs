@@ -159,6 +159,9 @@ struct GateState {
     start_delay: f64,
     last_spurt_start: Option<f64>,
     seen_skills: HashSet<String>,
+    /// Skills the runner had already used when she was prepared (the gate
+    /// skills), with the race time then.
+    gate_skills: HashMap<String, f64>,
     finish_order: Option<i32>,
     finish_time_raw: f64,
 }
@@ -317,7 +320,22 @@ impl RaceObserver for ReplayObserver {
     }
 
     fn on_runner_prepared(&mut self, race: &dyn RaceObservation, runner: &dyn RunnerObservation) {
-        self.inner.borrow_mut().record(race, runner);
+        let mut inner = self.inner.borrow_mut();
+        inner.record(race, runner);
+        // Gate skills fire while the runner is prepared, before the first
+        // tick, and the game stamps them there: on the 117 tournament
+        // recordings 4,271 skill events sit at t = 0 and none on ticks 1 or 2.
+        // Their events are written with the first tick's, once any debuff
+        // targets are known, at the time they fired.
+        let time = race.accumulated_time();
+        let gate = runner.id().0 as usize;
+        let used: Vec<String> = runner
+            .used_skills()
+            .into_iter()
+            .map(str::to_owned)
+            .collect();
+        let state = inner.gate_mut(gate);
+        state.gate_skills = used.into_iter().map(|id| (id, time)).collect();
     }
 
     fn on_after_runner_tick(
@@ -330,17 +348,20 @@ impl RaceObserver for ReplayObserver {
         inner.record(race, runner);
         let gate = runner.id().0 as usize;
         let time = race.accumulated_time();
-        let newly_used: Vec<String> = {
+        let newly_used: Vec<(String, f64)> = {
             let state = inner.gate_mut(gate);
             runner
                 .used_skills()
                 .into_iter()
                 .filter(|id| state.seen_skills.insert((*id).to_owned()))
-                .map(str::to_owned)
+                .map(|id| {
+                    let fired_at = state.gate_skills.remove(id).unwrap_or(time);
+                    (id.to_owned(), fired_at)
+                })
                 .collect()
         };
 
-        for skill_id in newly_used {
+        for (skill_id, fired_at) in newly_used {
             let target_mask = inner
                 .target_masks
                 .remove(&(runner.id(), skill_id.clone()))
@@ -351,7 +372,7 @@ impl RaceObserver for ReplayObserver {
                 continue;
             };
             inner.current.events.push(ReplayEvent {
-                frame_time: time as f32,
+                frame_time: fired_at as f32,
                 kind: EVENT_SKILL,
                 params: vec![gate as i32, numeric, -1, 0, target_mask, 0],
             });
@@ -764,6 +785,30 @@ mod tests {
         assert_eq!(events[0].kind, EVENT_SKILL);
         assert_eq!(events[0].params, vec![2, 200_331, -1, 0, 0b1_0001, 0]);
         assert_eq!(events[0].frame_time, FRAME_DT as f32);
+    }
+
+    #[test]
+    fn gate_skills_are_stamped_at_the_gate() {
+        let collector = RaceReplayCollector::new();
+        let mut obs = collector.handle();
+        let start = TestRace { time: 0.0 };
+        obs.on_round_start(&start, 1);
+        // 200431 fired while the runner was prepared; 200331 fires on the
+        // first tick.
+        let mut prepared = runner(0, 0.0);
+        prepared.used = vec!["200431".to_owned()];
+        obs.on_runner_prepared(&start, &prepared);
+        let mut first = runner(0, 0.2);
+        first.used = vec!["200431".to_owned(), "200331".to_owned()];
+        tick(&mut obs, FRAME_DT, &[first]);
+        obs.on_round_end(&TestRace { time: FRAME_DT });
+
+        let stamps: Vec<(i32, f32)> = collector.result()[0]
+            .events
+            .iter()
+            .map(|e| (e.params[1], e.frame_time))
+            .collect();
+        assert_eq!(stamps, vec![(200_431, 0.0), (200_331, FRAME_DT as f32)]);
     }
 
     /// A calm runner carries no mode, whatever the override last left behind.
