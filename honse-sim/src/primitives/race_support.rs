@@ -21,7 +21,8 @@ use crate::shared_kernel::ids::RunnerId;
 use crate::shared_kernel::language::{strategy_matches, Phase, Strategy};
 use crate::shared_kernel::rng::Prng;
 use crate::skills::condition::dynamic::{
-    ActiveRunner, ConditionTimers, RunnerSnapshot as DynRunnerSnapshot, ORDER_RATE_BANDS,
+    order_rate_band_holds, ActiveRunner, ConditionTimers, RunnerSnapshot as DynRunnerSnapshot,
+    ORDER_RATE_BANDS,
 };
 use crate::skills::effect::SkillTarget;
 
@@ -431,9 +432,9 @@ pub fn update_condition_timers(
         }
         if let Some(o) = order {
             if elapsed > ORDER_CONTINUE_GRACE_SECONDS {
-                for (i, thr) in thresholds.iter().enumerate() {
-                    t.in_band[i] &= o <= *thr;
-                    t.out_band[i] &= o > *thr;
+                for (i, &thr) in thresholds.iter().enumerate() {
+                    t.in_band[i] &= order_rate_band_holds(o, thr, true);
+                    t.out_band[i] &= order_rate_band_holds(o, thr, false);
                 }
             }
         }
@@ -1003,6 +1004,104 @@ mod tests {
         // Without the course windows nothing is counted.
         let mut tracker = FieldOrderTracker::new();
         assert_eq!(pass_two(&mut tracker, 1900.0), (0, 0, 0));
+    }
+
+    /// The `*_continue` bands past the 5 s grace in a 12-runner field: the
+    /// threshold's own place counts on both sides, so 8th stays outside the
+    /// top 70 % (round(8.4) = 8) and 2nd within the top 20 % (round(2.4) = 2),
+    /// while 7th and 3rd break them.
+    #[test]
+    fn continue_bands_keep_the_threshold_place() {
+        use crate::runner::test_support::test_runner;
+        use crate::skills::condition::dynamic::order_rate_band_index;
+
+        let runners: Vec<Runner> = (1..=12_u32)
+            .map(|id| {
+                let mut r = test_runner(id, Strategy::PaceChaser);
+                r.accumulate_time.t = 6.0;
+                r
+            })
+            .collect();
+        let mut snap = snapshot(
+            (1..=12_u32)
+                .map(|id| entry(id, 1000.0 - 10.0 * f64::from(id), Strategy::PaceChaser))
+                .collect(),
+        );
+        for id in 1..=12_u32 {
+            snap.order.insert(RunnerId(id), i64::from(id));
+            snap.previous_order.insert(RunnerId(id), i64::from(id));
+        }
+        let mut tracker = FieldOrderTracker::new();
+        update_condition_timers(&mut snap, &mut tracker, &runners, DT, LANE);
+
+        let in20 = order_rate_band_index(0.2).expect("a band");
+        let out70 = order_rate_band_index(0.7).expect("a band");
+        let timers = |id: u32| snap.condition_timers[&RunnerId(id)];
+        assert!(timers(2).in_band[in20]);
+        assert!(!timers(3).in_band[in20]);
+        assert!(timers(8).out_band[out70]);
+        assert!(!timers(7).out_band[out70]);
+    }
+
+    /// The band latch on GameTora's worked examples. Out bands, 9 umas: out70
+    /// is 6th or worse, out50 5th or worse (round(4.5) = 5, a half rounding
+    /// up), out40 4th or worse, out20 2nd or worse. In bands, 10 umas: in20 is
+    /// 2nd or better, in40 4th, in50 5th, in80 8th. GameTora gives no in-band
+    /// example for 9 umas; the same rounding puts in20 at 2nd, in40 4th, in50
+    /// 5th and in80 7th.
+    #[test]
+    fn continue_bands_follow_gametoras_worked_examples() {
+        use crate::runner::test_support::test_runner;
+        use crate::skills::condition::dynamic::order_rate_band_index;
+
+        // One tick past the grace, runner k in place k of n.
+        let latched = |n: u32| {
+            let runners: Vec<Runner> = (1..=n)
+                .map(|id| {
+                    let mut r = test_runner(id, Strategy::PaceChaser);
+                    r.accumulate_time.t = ORDER_CONTINUE_GRACE_SECONDS + DT;
+                    r
+                })
+                .collect();
+            let mut snap = snapshot(
+                (1..=n)
+                    .map(|id| entry(id, 1000.0 - 10.0 * f64::from(id), Strategy::PaceChaser))
+                    .collect(),
+            );
+            for id in 1..=n {
+                snap.order.insert(RunnerId(id), i64::from(id));
+                snap.previous_order.insert(RunnerId(id), i64::from(id));
+            }
+            update_condition_timers(&mut snap, &mut FieldOrderTracker::new(), &runners, DT, LANE);
+            snap.condition_timers
+        };
+        let band = |rate: f64| order_rate_band_index(rate).expect("a band");
+
+        let nine = latched(9);
+        // (rate, the best place outside the top rate)
+        for (rate, edge) in [(0.7, 6_u32), (0.5, 5), (0.4, 4), (0.2, 2)] {
+            let out = |place: u32| nine[&RunnerId(place)].out_band[band(rate)];
+            assert!(out(edge), "out {rate}: place {edge} of 9 holds");
+            assert!(out(9), "out {rate}: place 9 of 9 holds");
+            assert!(!out(edge - 1), "out {rate}: place {} of 9", edge - 1);
+        }
+        let ten = latched(10);
+        // (field, rate, the worst place within the top rate)
+        for (field, n, rate, edge) in [
+            (&ten, 10, 0.2, 2_u32),
+            (&ten, 10, 0.4, 4),
+            (&ten, 10, 0.5, 5),
+            (&ten, 10, 0.8, 8),
+            (&nine, 9, 0.2, 2),
+            (&nine, 9, 0.4, 4),
+            (&nine, 9, 0.5, 5),
+            (&nine, 9, 0.8, 7),
+        ] {
+            let within = |place: u32| field[&RunnerId(place)].in_band[band(rate)];
+            assert!(within(1), "in {rate}: place 1 of {n} holds");
+            assert!(within(edge), "in {rate}: place {edge} of {n} holds");
+            assert!(!within(edge + 1), "in {rate}: place {} of {n}", edge + 1);
+        }
     }
 
     /// The snapshot keeps the rearmost runner's position and every runner's

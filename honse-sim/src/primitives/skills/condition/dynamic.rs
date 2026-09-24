@@ -47,7 +47,8 @@ pub struct RunnerSnapshot {
 ///   inner fence.
 /// * `in_band` / `out_band`: whether the runner has stayed within / outside the
 ///   top 20, 40, 50, 70 and 80 % (placement against `round(n * rate)`, as the
-///   plain `order_rate`) at every tick after the first 5 s.
+///   plain `order_rate`, by [`order_rate_band_holds`]) at every tick after the
+///   first 5 s.
 /// * `order_up_middle` / `order_up_end_after` / `order_up_finalcorner_after`:
 ///   how many times the runner has overtaken someone during the Mid-Race,
 ///   since entering the Late-Race, and since entering the final corner; a
@@ -118,6 +119,22 @@ pub fn order_rate_band_index(rate: f64) -> Option<usize> {
     ORDER_RATE_BANDS
         .iter()
         .position(|b| (b - rate).abs() < 1e-9)
+}
+
+/// Whether placement `order` is inside an `order_rate_{in,out}NN_continue`
+/// band on this tick, against `threshold = round(n * rate)`. The threshold's
+/// own place counts on both sides: "within the top 40 %" of 10 is 4th or
+/// better, "worse than the top 70 %" of 9 is 6th or worse (GameTora's worked
+/// examples). v0.13.0 took the out side as `order > threshold`; on the 117
+/// recordings (n = 12, out70 = 8th or worse) that rejects 8 of 110611's 31
+/// fires and 7 of 910611's 17, where `>=` admits every one. The in side's
+/// `<=` admits all 11 of 100641's (in20) fires, where `<` would miss 10.
+pub fn order_rate_band_holds(order: i64, threshold: i64, is_in_rate: bool) -> bool {
+    if is_in_rate {
+        order <= threshold
+    } else {
+        order >= threshold
+    }
 }
 
 /// Live state of an active (non-finished) runner, used by the state conditions

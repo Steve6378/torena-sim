@@ -5,8 +5,8 @@
 //! through [`RunnerView`]) to gate order-relative skills.
 
 use crate::skills::condition::dynamic::{
-    bool_num, compare, order_rate_band_index, register_dynamic_condition, DynamicCondition,
-    RunnerView,
+    bool_num, compare, order_rate_band_holds, order_rate_band_index, register_dynamic_condition,
+    DynamicCondition, RunnerView,
 };
 
 use crate::skills::condition::operator::CmpKind;
@@ -24,11 +24,7 @@ fn order_rate_continue(
         return false;
     };
     let threshold = (runner.num_umas() as f64 * rate).round() as i64;
-    let within_rate = if is_in_rate {
-        order <= threshold
-    } else {
-        order > threshold
-    };
+    let within_rate = order_rate_band_holds(order, threshold, is_in_rate);
     // "For the entire race until now" (GameTora): the live field latches the
     // band from 5 s on, so one tick on the wrong side ends it for the race.
     // Without a live field, only the current tick can be read.
@@ -291,6 +287,80 @@ mod tests {
             ..Default::default()
         };
         assert!(!cond.eval(&too_early));
+    }
+
+    /// Worse than the top 70 % of 12 is 8th or worse (round(8.4) = 8), and
+    /// within the top 20 % is 2nd or better (round(2.4) = 2): the threshold's
+    /// own place counts on both sides.
+    #[test]
+    fn order_rate_continue_bands_keep_the_threshold_place() {
+        register_order_conditions();
+        let out70 = get_dynamic_condition("order_rate_out70_continue").expect("registered");
+        let in20 = get_dynamic_condition("order_rate_in20_continue").expect("registered");
+        let (out70, in20) = (out70(1, CmpKind::Eq), in20(1, CmpKind::Eq));
+        let at = |order: i64| TestRunner {
+            num_umas: 12,
+            current_order: Some(order),
+            accumulate_time: 6.0,
+            ..Default::default()
+        };
+
+        assert!(out70.eval(&at(8)));
+        assert!(out70.eval(&at(12)));
+        assert!(!out70.eval(&at(7)));
+        assert!(in20.eval(&at(2)));
+        assert!(!in20.eval(&at(3)));
+    }
+
+    /// GameTora's worked examples. Out bands, 9 umas: out70 is 6th or worse
+    /// (round(6.3) = 6), out50 5th or worse (round(4.5) = 5: a half rounds up,
+    /// where rounding half to even would make it 4th), out40 4th or worse
+    /// (round(3.6) = 4), out20 2nd or worse (round(1.8) = 2). In bands, 10
+    /// umas: in20 is 2nd or better, in40 4th, in50 5th, in80 8th. GameTora
+    /// gives no in-band example for 9 umas; the same rounding puts in20 at
+    /// 2nd, in40 4th, in50 5th (round(4.5) = 5) and in80 7th (round(7.2) = 7).
+    #[test]
+    fn order_rate_continue_bands_follow_gametoras_worked_examples() {
+        register_order_conditions();
+        let holds = |token: &str, num_umas: i64, order: i64| {
+            let factory = get_dynamic_condition(token).expect("registered");
+            factory(1, CmpKind::Eq).eval(&TestRunner {
+                num_umas,
+                current_order: Some(order),
+                accumulate_time: 6.0,
+                ..Default::default()
+            })
+        };
+
+        // (token, the best place that holds, in a field of 9)
+        for (token, edge) in [
+            ("order_rate_out70_continue", 6),
+            ("order_rate_out50_continue", 5),
+            ("order_rate_out40_continue", 4),
+            ("order_rate_out20_continue", 2),
+        ] {
+            assert!(holds(token, 9, edge), "{token}: place {edge} of 9 holds");
+            assert!(holds(token, 9, 9), "{token}: place 9 of 9 holds");
+            let inside = edge - 1;
+            assert!(!holds(token, 9, inside), "{token}: place {inside} of 9");
+        }
+        // (token, field size, the worst place that holds)
+        for (token, num_umas, edge) in [
+            ("order_rate_in20_continue", 10, 2),
+            ("order_rate_in40_continue", 10, 4),
+            ("order_rate_in50_continue", 10, 5),
+            ("order_rate_in80_continue", 10, 8),
+            ("order_rate_in20_continue", 9, 2),
+            ("order_rate_in40_continue", 9, 4),
+            ("order_rate_in50_continue", 9, 5),
+            ("order_rate_in80_continue", 9, 7),
+        ] {
+            let at = |order: i64| holds(token, num_umas, order);
+            assert!(at(1), "{token}: place 1 of {num_umas} holds");
+            assert!(at(edge), "{token}: place {edge} of {num_umas} holds");
+            let outside = edge + 1;
+            assert!(!at(outside), "{token}: place {outside} of {num_umas}");
+        }
     }
 
     #[test]
