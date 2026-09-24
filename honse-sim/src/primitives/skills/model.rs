@@ -293,6 +293,13 @@ pub struct SkillTrigger {
     pub cooldown_time: Option<f64>,
     /// The runtime half of the alternative's precondition, if it has one.
     pub precondition: Option<DynamicPrecondition>,
+    /// The alternative's index in the skill data when the skill has another
+    /// live alternative it excludes: the game checks them in order and fires
+    /// the first that holds (the recordings' skill events log that index).
+    /// `None` for a skill's only live alternative, and for one naming
+    /// `is_activate_other_skill_detail` / `is_used_skill_id`, which triggers
+    /// on its own.
+    pub exclusive_alternative: Option<usize>,
 }
 
 /// The runtime half of a skill's precondition.
@@ -451,6 +458,10 @@ pub struct PendingSkill {
     pub forced: bool,
     /// The runtime half of the precondition, latched once it holds.
     pub precondition: Option<DynamicPrecondition>,
+    /// See [`SkillTrigger::exclusive_alternative`]: the skill's exclusive
+    /// alternatives share one wit check and one cooldown, and the lowest
+    /// index that holds fires.
+    pub exclusive_alternative: Option<usize>,
 }
 
 /// An opponent-facing (external) debuff a runner emitted this frame, awaiting the

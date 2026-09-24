@@ -9,6 +9,8 @@
 //! activation** are coordinated by the aggregate (t-017) since they observe /
 //! mutate the rest of the field. Each runner's self-side exit logic lives here.
 
+use std::collections::HashSet;
+
 use crate::runner::physics::{DuelingInput, FieldInputs, UpdateContext};
 use crate::runner::Runner;
 use crate::shared_kernel::language::{DistanceType, Strategy};
@@ -206,14 +208,23 @@ impl Runner {
     /// effects, in probability units. Restraint (`202161`) carries a raw
     /// `-30000` modifier (`-3.0` after ×10000 scaling) = −3 percentage points
     /// → `-0.03`. Read from the pending queue because the rushed roll in
-    /// `initialize_rushed_state` runs before gate skills are consumed.
+    /// `initialize_rushed_state` runs before gate skills are consumed. A skill
+    /// counts once, through its first pending entry that carries the effect:
+    /// its exclusive alternatives are one skill that fires once.
     fn rushed_chance_adjustment(&self) -> f64 {
-        self.pending_skills
-            .iter()
-            .flat_map(|skill| skill.effects.iter())
-            .filter(|effect| effect.effect_type == SkillType::RushedChance)
-            .map(|effect| effect.modifier / 100.0)
-            .sum()
+        let mut counted: HashSet<&str> = HashSet::new();
+        let mut adjustment = 0.0;
+        for skill in &self.pending_skills {
+            let mut effects = skill
+                .effects
+                .iter()
+                .filter(|effect| effect.effect_type == SkillType::RushedChance)
+                .peekable();
+            if effects.peek().is_some() && counted.insert(skill.skill_id.as_str()) {
+                adjustment += effects.map(|effect| effect.modifier / 100.0).sum::<f64>();
+            }
+        }
+        adjustment
     }
 
     fn rushed_chance(&self) -> f64 {
@@ -902,12 +913,70 @@ mod tests {
             wit_passed: false,
             forced: false,
             precondition: None,
+            exclusive_alternative: None,
         });
 
         assert!(
             (r.rushed_chance() - (base - 0.03)).abs() < 1e-12,
             "type-29 effect must lower the rushed chance by 0.03"
         );
+    }
+
+    /// A pending entry of skill `id` carrying a type-29 effect of -3.0 (-0.03
+    /// probability), as alternative `exclusive_alternative`.
+    fn rushed_reducer(
+        id: &str,
+        exclusive_alternative: Option<usize>,
+    ) -> crate::skills::model::PendingSkill {
+        use crate::shared_kernel::ids::SkillId;
+        use crate::shared_kernel::region::Region;
+        use crate::skills::effect::{SkillRarity, SkillTarget, SkillType};
+        use crate::skills::model::{PendingSkill, SkillEffectSpec};
+        use crate::skills::value_scaling::ValueScalingPolicy;
+
+        PendingSkill {
+            skill_id: SkillId::new(id),
+            rarity: SkillRarity::White,
+            tags: vec![],
+            trigger: Region::new(0.0, 1.0),
+            effects: vec![SkillEffectSpec {
+                target: SkillTarget::SelfTarget,
+                effect_type: SkillType::RushedChance,
+                base_duration: -1.0,
+                modifier: -3.0,
+                value_scaling: ValueScalingPolicy::Direct,
+                additional_activate_type: None,
+                value_level_usage: Some(1),
+            }],
+            extra_condition: None,
+            target_strategy: None,
+            duration_scaling: None,
+            cooldown: 0.0,
+            later_triggers: Vec::new(),
+            ready_at: f64::NEG_INFINITY,
+            wit_passed: false,
+            forced: false,
+            precondition: None,
+            exclusive_alternative,
+        }
+    }
+
+    #[test]
+    fn rushed_chance_counts_a_skill_once_whatever_its_alternatives() {
+        // One skill of two exclusive alternatives fires once, so its type-29
+        // effect lowers the chance once; a second skill lowers it again.
+        let mut r = test_runner(0, Strategy::PaceChaser);
+        let base = r.base_rushed_chance();
+        r.pending_skills.push(rushed_reducer("202161", Some(0)));
+        r.pending_skills.push(rushed_reducer("202161", Some(1)));
+        assert!(
+            (r.rushed_chance() - (base - 0.03)).abs() < 1e-12,
+            "{} against {}",
+            r.rushed_chance(),
+            base - 0.03
+        );
+        r.pending_skills.push(rushed_reducer("202162", None));
+        assert!((r.rushed_chance() - (base - 0.06)).abs() < 1e-12);
     }
 
     /// Drive a rushed spell one 1/15 s tick at a time and report the tick on

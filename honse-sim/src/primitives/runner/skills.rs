@@ -12,6 +12,8 @@
 //! activation call, so the borrow checker is satisfied and resolution order is
 //! irrelevant.
 
+use std::collections::HashSet;
+
 use crate::runner::lifecycle::PrepareContext;
 use crate::runner::{Runner, UsedTargetedSkill};
 use crate::shared_kernel::ids::SkillId;
@@ -228,8 +230,10 @@ pub fn build_skill_data(params: &BuildSkillDataParams<'_>) -> Vec<SkillTrigger> 
     extra.skill_id = Some(skill.skill_id.clone());
 
     let mut triggers: Vec<SkillTrigger> = Vec::new();
+    // The data index of the alternative behind `triggers[0]`.
+    let mut first_alternative = 0;
 
-    for alt in &skill.alternatives {
+    for (index, alt) in skill.alternatives.iter().enumerate() {
         if alt.condition.is_empty() {
             continue;
         }
@@ -287,12 +291,23 @@ pub fn build_skill_data(params: &BuildSkillDataParams<'_>) -> Vec<SkillTrigger> 
             continue;
         }
 
-        if !triggers.is_empty() && !condition_allows_second_trigger(&alt.condition) {
-            continue;
-        }
+        // A later alternative naming the multi-trigger tokens triggers on its
+        // own. Any other is the same skill under another condition: the game
+        // checks the alternatives in order and fires the first that holds,
+        // once. Such alternatives used to be dropped; the recordings' skill
+        // events log the alternative that fired (params[3]), and 117 of them
+        // went through the second, over 23 skills (110101: 10 of its 25).
+        let exclusive = !triggers.is_empty() && !condition_allows_second_trigger(&alt.condition);
 
         let effects = build_skill_effects(alt);
         if !effects.is_empty() || params.ignore_null_effects {
+            if triggers.is_empty() {
+                first_alternative = index;
+            } else if exclusive {
+                triggers[0]
+                    .exclusive_alternative
+                    .get_or_insert(first_alternative);
+            }
             triggers.push(SkillTrigger {
                 skill_id: skill.skill_id.clone(),
                 rarity: skill.rarity,
@@ -305,6 +320,7 @@ pub fn build_skill_data(params: &BuildSkillDataParams<'_>) -> Vec<SkillTrigger> 
                 duration_scaling: alt.duration_scaling,
                 cooldown_time: alt.cooldown_time,
                 precondition: runtime_pre,
+                exclusive_alternative: exclusive.then_some(index),
             });
         }
     }
@@ -336,11 +352,13 @@ pub fn build_skill_data(params: &BuildSkillDataParams<'_>) -> Vec<SkillTrigger> 
         duration_scaling: first.duration_scaling,
         cooldown_time: first.cooldown_time,
         precondition: None,
+        exclusive_alternative: None,
     }]
 }
 
-/// Whether a second trigger may be placed for a skill (only when the condition
-/// explicitly references the multi-trigger tokens).
+/// Whether a later alternative triggers on its own rather than as an exclusive
+/// alternative of the first (only when its condition explicitly references the
+/// multi-trigger tokens).
 fn condition_allows_second_trigger(condition: &str) -> bool {
     condition.contains("is_activate_other_skill_detail") || condition.contains("is_used_skill_id")
 }
@@ -411,8 +429,7 @@ impl Runner {
         let eval_runner = self.skill_eval_runner();
         let skills = std::mem::take(&mut self.skills);
         let mut pending: Vec<PendingSkill> = Vec::new();
-        let mut forced_bypass_granted: std::collections::HashSet<String> =
-            std::collections::HashSet::new();
+        let mut forced_bypass_granted: HashSet<String> = HashSet::new();
         for skill in &skills {
             let triggers = build_skill_data(&BuildSkillDataParams {
                 runner: &eval_runner,
@@ -431,6 +448,11 @@ impl Runner {
                 // only the first alternative's trigger gets the bypass so
                 // mutually exclusive alternatives cannot both fire there.
                 let forced = forced_pos.is_some() && forced_bypass_granted.insert(base);
+                // The scripted activation stands for the skill: its exclusive
+                // alternatives stay out.
+                if forced_pos.is_some() && !forced && trigger.exclusive_alternative.is_some() {
+                    continue;
+                }
                 let policy = match forced_pos {
                     Some(pos) => ActivationSamplePolicy::Fixed(pos),
                     None => trigger.sample_policy,
@@ -472,6 +494,7 @@ impl Runner {
                     wit_passed: false,
                     forced,
                     precondition: if forced { None } else { trigger.precondition },
+                    exclusive_alternative: trigger.exclusive_alternative,
                 });
             }
         }
@@ -509,6 +532,7 @@ impl Runner {
                     wit_passed: false,
                     forced: true,
                     precondition: None,
+                    exclusive_alternative: None,
                 });
                 break;
             }
@@ -662,18 +686,25 @@ impl Runner {
                 continue;
             }
 
-            let cooled_down = self.accumulate_time.t >= self.pending_skills[i].ready_at;
-            if self.position >= trigger.start
-                && cooled_down
-                && (forced
-                    || (DynamicPrecondition::is_met(self.pending_skills[i].precondition.as_ref())
-                        && self.pending_extra_passes(i, field)))
-            {
+            // A skill's alternatives are pending in data order, so the first
+            // that holds is checked first: it fires or spends the skill's wit
+            // roll, and either way holds the later ones (the game fires the
+            // first alternative that holds, once).
+            if self.pending_holds(i, field) {
                 let skip =
                     forced || self.pending_skills[i].wit_passed || self.should_skip_wit_check_at(i);
-                if skip || self.do_wit_check() {
-                    let skill = self.pending_skills[i].clone();
+                let passed = skip || self.do_wit_check();
+                let skill = self.pending_skills[i].clone();
+                if passed {
                     self.activate_skill(&skill, course_distance);
+                    // One skill, one cooldown: its other alternatives wait it
+                    // out too, and without a cooldown the skill is spent.
+                    let until = if skill.cooldown > 0.0 {
+                        self.accumulate_time.t + skill.cooldown
+                    } else {
+                        f64::INFINITY
+                    };
+                    self.hold_exclusive_alternatives(&skill, until, true);
                     // Mechanics doc § Skill Cooldown: a skill with a cooldown may
                     // activate again once it has elapsed, in its own window or at
                     // a later placed trigger (all_corner_random). The wit check
@@ -687,7 +718,9 @@ impl Runner {
                     if skill.cooldown > 0.0 {
                         let now = self.accumulate_time.t;
                         let same = |p: &PendingSkill| {
-                            p.skill_id == skill.skill_id && p.trigger == skill.trigger
+                            p.skill_id == skill.skill_id
+                                && p.trigger == skill.trigger
+                                && p.exclusive_alternative == skill.exclusive_alternative
                         };
                         let at = if self.pending_skills.get(i).is_some_and(same) {
                             Some(i)
@@ -701,6 +734,9 @@ impl Runner {
                         }
                         continue;
                     }
+                } else {
+                    // One wit check per skill, whichever alternative asked.
+                    self.hold_exclusive_alternatives(&skill, f64::INFINITY, false);
                 }
                 if i < self.pending_skills.len() {
                     self.pending_skills.remove(i);
@@ -799,6 +835,36 @@ impl Runner {
                 continue; // additional activations in the data are self-buffs
             }
             self.apply_self_effect(&skill, &resolved, remaining);
+        }
+    }
+
+    /// Whether pending skill `idx` may activate this tick: inside its window,
+    /// cooled down, and (unless forced) its precondition latched and its
+    /// condition holding.
+    fn pending_holds(&self, idx: usize, field: &FieldView) -> bool {
+        let skill = &self.pending_skills[idx];
+        self.position >= skill.trigger.start
+            && self.position < skill.trigger.end
+            && self.accumulate_time.t >= skill.ready_at
+            && (skill.forced
+                || (DynamicPrecondition::is_met(skill.precondition.as_ref())
+                    && self.pending_extra_passes(idx, field)))
+    }
+
+    /// Hold the skill's other exclusive alternatives until race time `until`
+    /// (`INFINITY`: for the rest of the race), their wit check passed if
+    /// `wit_passed`.
+    fn hold_exclusive_alternatives(&mut self, skill: &PendingSkill, until: f64, wit_passed: bool) {
+        let Some(k) = skill.exclusive_alternative else {
+            return;
+        };
+        for other in &mut self.pending_skills {
+            if other.skill_id == skill.skill_id
+                && other.exclusive_alternative.is_some_and(|m| m != k)
+            {
+                other.ready_at = other.ready_at.max(until);
+                other.wit_passed |= wit_passed;
+            }
         }
     }
 
@@ -1048,6 +1114,13 @@ impl Runner {
             })
             .map(|(idx, _)| idx)
             .collect();
+        // A skill is one candidate however many of its entries are pending,
+        // exclusive alternatives or a second stage naming
+        // is_activate_other_skill_detail: the first stands for it, as for a
+        // scripted position (which alternative the game applies here is not
+        // determined).
+        let mut seen: HashSet<&str> = HashSet::new();
+        gold_indices.retain(|&idx| seen.insert(self.pending_skills[idx].skill_id.as_str()));
 
         let mut i = gold_indices.len();
         while i > 0 {
@@ -1059,6 +1132,14 @@ impl Runner {
         for &idx in gold_indices.iter().take(count) {
             let skill = self.pending_skills[idx].clone();
             self.activate_skill(&skill, course_distance);
+            // The gold is spent, every alternative of it: the removal below
+            // drops only the first entry the pass meets, so hold them all for
+            // the race (nor are they candidates for another forced gold).
+            for pending in &mut self.pending_skills {
+                if pending.skill_id == skill.skill_id {
+                    pending.ready_at = f64::INFINITY;
+                }
+            }
             self.pending_skill_removal.insert(skill.skill_id.0.clone());
         }
     }
@@ -1332,7 +1413,7 @@ mod tests {
     use crate::shared_kernel::ids::{RunnerId, SkillId};
     use crate::shared_kernel::language::{Aptitude, GroundCondition, Mood, Strategy};
     use crate::shared_kernel::params::StatLine;
-    use crate::shared_kernel::rng::Xoshiro256StarStar;
+    use crate::shared_kernel::rng::{Prng, Xoshiro256StarStar};
     use crate::skills::condition::catalog::build_catalog;
     use crate::skills::condition::language::ConditionParser;
     use crate::skills::effect::{SkillRarity, SkillTarget, SkillType};
@@ -2432,6 +2513,289 @@ mod tests {
         r.position = 950.0; // past the last window: done
         r.process_skill_activations(&FieldView::at_gate(), 2400.0);
         assert!(r.pending_skills.is_empty());
+    }
+
+    /// A skill of two alternatives, as the data carries them: the first
+    /// applies 4500, the second 3500, both with `cooldown_time`.
+    fn two_alternative_skill(
+        id: &str,
+        rarity: SkillRarity,
+        conditions: [&str; 2],
+        cooldown_time: Option<f64>,
+    ) -> Skill {
+        let mut skill = target_speed_skill(id, rarity, conditions[0]);
+        skill.alternatives[0].cooldown_time = cooldown_time;
+        let mut second = skill.alternatives[0].clone();
+        second.condition = conditions[1].to_owned();
+        second.effects[0].modifier = 3500.0;
+        skill.alternatives.push(second);
+        skill
+    }
+
+    /// Run `ticks` activation passes, 1 m and 1/15 s apart, with the leader
+    /// `ahead` metres in front.
+    fn run_ticks(r: &mut Runner, ahead: f64, ticks: usize) {
+        for _ in 0..ticks {
+            let field = FieldView {
+                leader_position: Some(r.position + ahead),
+                ..FieldView::default()
+            };
+            r.process_skill_activations(&field, 2400.0);
+            r.position += 1.0;
+            r.accumulate_time.advance(1.0 / 15.0);
+        }
+    }
+
+    /// Wit rolls from a script: each draw takes the next value, the last one
+    /// repeating.
+    struct ScriptedRolls(Vec<f64>);
+
+    impl Prng for ScriptedRolls {
+        fn int32(&mut self) -> u32 {
+            0
+        }
+        fn random(&mut self) -> f64 {
+            if self.0.len() > 1 {
+                self.0.remove(0)
+            } else {
+                self.0[0]
+            }
+        }
+        fn uniform(&mut self, _upper: u32) -> u32 {
+            0
+        }
+    }
+
+    /// 110101's shape: the first alternative needs the leader within 5 m, the
+    /// second does not. The game fires the first that holds, once (the
+    /// recordings log which: 15 of 110101's firings the first, 10 the second).
+    #[test]
+    fn exclusive_alternatives_fire_the_first_that_holds_once() {
+        let fire = |ahead: f64| {
+            let skill = two_alternative_skill(
+                "110101",
+                SkillRarity::Unique,
+                ["phase>=2&distance_diff_top<=5", "phase>=2"],
+                Some(5_000_000.0),
+            );
+            let mut r = runner_with_skills(vec![skill]);
+            prepare(&mut r);
+            assert_eq!(r.pending_skills.len(), 2, "both alternatives kept");
+            r.position = r.pending_skills[0].trigger.start + 0.5;
+            run_ticks(&mut r, ahead, 3);
+            (r.skills_activated_count, r.modifiers.target_speed.total())
+        };
+        // Both hold: the first fires, and only it.
+        let (count, speed) = fire(2.0);
+        assert_eq!(count, 1);
+        assert!((speed - 0.45).abs() < 1e-9, "{speed}");
+        // Only the second holds: it fires, once.
+        let (count, speed) = fire(9.0);
+        assert_eq!(count, 1);
+        assert!((speed - 0.35).abs() < 1e-9, "{speed}");
+    }
+
+    /// 100671's shape (leader within 5 m, or not): one wit roll and one
+    /// cooldown (30 s base: 72 s at 2400 m) for the skill, whichever
+    /// alternative fires.
+    #[test]
+    fn exclusive_alternatives_share_one_wit_check_and_one_cooldown() {
+        let runner = |rolls: Vec<f64>| {
+            let skill = two_alternative_skill(
+                "100671",
+                SkillRarity::White,
+                [
+                    "phase>=2&distance_diff_top<=5",
+                    "phase>=2&distance_diff_top>5",
+                ],
+                Some(300_000.0),
+            );
+            let mut r = runner_with_skills(vec![skill]);
+            prepare(&mut r);
+            r.wit_rng = Box::new(ScriptedRolls(rolls));
+            r.position = r.pending_skills[0].trigger.start + 0.5;
+            r
+        };
+        // The first roll passes, every later one would fail.
+        let mut r = runner(vec![0.0, 0.99]);
+        run_ticks(&mut r, 2.0, 1);
+        assert_eq!(r.skills_activated_count, 1, "the first alternative");
+        r.accumulate_time.advance(10.0);
+        run_ticks(&mut r, 9.0, 1);
+        assert_eq!(
+            r.skills_activated_count, 1,
+            "the second, inside the cooldown"
+        );
+        r.accumulate_time.advance(63.0);
+        run_ticks(&mut r, 9.0, 1);
+        assert_eq!(
+            r.skills_activated_count, 2,
+            "the second, after the cooldown, on the roll already passed"
+        );
+        assert!((r.modifiers.target_speed.total() - 0.80).abs() < 1e-9);
+
+        // The first roll fails, every later one would pass: the skill is out
+        // whichever alternative comes to hold.
+        let mut r = runner(vec![0.99, 0.0]);
+        run_ticks(&mut r, 2.0, 1);
+        run_ticks(&mut r, 9.0, 3);
+        assert_eq!(r.skills_activated_count, 0);
+    }
+
+    /// A later alternative naming `is_activate_other_skill_detail` is a second
+    /// stage of the skill: it still triggers on its own, after the first.
+    /// One naming `is_used_skill_id` first (110641's shape) is the same skill
+    /// under another condition, exclusive of the plain one after it.
+    #[test]
+    fn multi_trigger_tokens_keep_their_own_trigger() {
+        let fire = |conditions: [&str; 2], used: Option<&str>| {
+            let skill = two_alternative_skill("110641", SkillRarity::Unique, conditions, None);
+            let mut r = runner_with_skills(vec![skill]);
+            prepare(&mut r);
+            if let Some(id) = used {
+                r.used_skills.insert(id.to_owned());
+            }
+            r.position = r.pending_skills[0].trigger.start + 0.5;
+            run_ticks(&mut r, 2.0, 3);
+            (r.skills_activated_count, r.modifiers.target_speed.total())
+        };
+        let (count, speed) = fire(
+            ["phase>=2", "phase>=2&is_activate_other_skill_detail==1"],
+            None,
+        );
+        assert_eq!(count, 2, "both stages");
+        assert!((speed - 0.80).abs() < 1e-9, "{speed}");
+
+        let runaway_first = ["phase>=2&is_used_skill_id==202051", "phase>=2"];
+        let (count, speed) = fire(runaway_first, Some("202051"));
+        assert_eq!(count, 1);
+        assert!((speed - 0.45).abs() < 1e-9, "{speed}");
+        let (count, speed) = fire(runaway_first, None);
+        assert_eq!(count, 1);
+        assert!((speed - 0.35).abs() < 1e-9, "{speed}");
+    }
+
+    #[test]
+    fn a_scripted_skill_fires_once_through_its_first_alternative() {
+        let skill = two_alternative_skill(
+            "110101",
+            SkillRarity::Unique,
+            ["phase>=2&distance_diff_top<=5", "phase>=2"],
+            Some(5_000_000.0),
+        );
+        let mut r =
+            runner_with_skills_forced(vec![skill], HashMap::from([("110101".to_owned(), 1700.0)]));
+        prepare(&mut r);
+        assert_eq!(r.pending_skills.len(), 1, "one scripted activation");
+        r.position = 1700.5;
+        run_ticks(&mut r, 9.0, 3);
+        assert_eq!(r.skills_activated_count, 1);
+        assert!((r.modifiers.target_speed.total() - 0.45).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_forced_gold_is_one_candidate_whatever_its_alternatives() {
+        // A carrier forcing two golds, and one gold of two alternatives: the
+        // gold fires once, through its first alternative, and not again in its
+        // own window.
+        let mut carrier = target_speed_skill("110071", SkillRarity::White, "phase==1");
+        carrier.alternatives[0].effects.push(RawSkillEffect {
+            modifier: 20000.0,
+            target: SkillTarget::SelfTarget,
+            effect_type: 37, // ActivateRandomGold
+            value_usage: None,
+            value_level_usage: None,
+            pre_applied_multiplier: None,
+            additional_activate_type: None,
+        });
+        let gold = two_alternative_skill(
+            "200002",
+            SkillRarity::Gold,
+            ["phase>=2&distance_diff_top<=5", "phase>=2"],
+            None,
+        );
+        let mut r = runner_with_skills(vec![carrier, gold]);
+        prepare(&mut r);
+        r.wit_checks_enabled = false;
+        let window = r
+            .pending_skills
+            .iter()
+            .find(|p| p.skill_id.as_str() == "200002")
+            .expect("gold pending")
+            .trigger;
+        let applied = |r: &Runner| -> Vec<f64> {
+            r.target_speed_skills_active
+                .iter()
+                .filter(|a| a.skill_id.as_str() == "200002")
+                .map(|a| a.modifier)
+                .collect()
+        };
+        fire_carrier(&mut r);
+        assert_eq!(applied(&r), vec![0.45]);
+        // On into the gold's own window with the leader 2 m ahead, where both
+        // alternatives hold: the forced activation was the gold's one.
+        r.position = window.start + 0.5;
+        run_ticks(&mut r, 2.0, 3);
+        assert_eq!(applied(&r), vec![0.45]);
+        assert_eq!(r.skills_activated_count, 2, "the carrier and the gold");
+    }
+
+    #[test]
+    fn a_forced_gold_with_a_second_stage_is_one_candidate() {
+        // A carrier forcing two golds, and one gold of two stages, the second
+        // naming is_activate_other_skill_detail (100703111's shape, an
+        // Evolution skill): the second stage triggers on its own, so the gold
+        // has two pending entries, yet it is forced once, through its first
+        // alternative, and neither stage fires again in its own window.
+        let mut carrier = target_speed_skill("110071", SkillRarity::White, "phase==1");
+        carrier.alternatives[0].effects.push(RawSkillEffect {
+            modifier: 20000.0,
+            target: SkillTarget::SelfTarget,
+            effect_type: 37, // ActivateRandomGold
+            value_usage: None,
+            value_level_usage: None,
+            pre_applied_multiplier: None,
+            additional_activate_type: None,
+        });
+        for rarity in [SkillRarity::Gold, SkillRarity::Evolution] {
+            let gold = two_alternative_skill(
+                "200002",
+                rarity,
+                ["phase>=2", "phase>=2&is_activate_other_skill_detail==1"],
+                None,
+            );
+            let mut r = runner_with_skills(vec![carrier.clone(), gold]);
+            prepare(&mut r);
+            r.wit_checks_enabled = false;
+            let entries = r
+                .pending_skills
+                .iter()
+                .filter(|p| p.skill_id.as_str() == "200002")
+                .count();
+            assert_eq!(entries, 2, "{rarity:?}: both stages pending");
+            let window = r
+                .pending_skills
+                .iter()
+                .find(|p| p.skill_id.as_str() == "200002")
+                .expect("gold pending")
+                .trigger;
+            let applied = |r: &Runner| -> Vec<f64> {
+                r.target_speed_skills_active
+                    .iter()
+                    .filter(|a| a.skill_id.as_str() == "200002")
+                    .map(|a| a.modifier)
+                    .collect()
+            };
+            fire_carrier(&mut r);
+            assert_eq!(applied(&r), vec![0.45], "{rarity:?}");
+            r.position = window.start + 0.5;
+            run_ticks(&mut r, 2.0, 3);
+            assert_eq!(applied(&r), vec![0.45], "{rarity:?}");
+            assert_eq!(
+                r.skills_activated_count, 2,
+                "{rarity:?}: the carrier and the gold"
+            );
+        }
     }
 
     #[test]
