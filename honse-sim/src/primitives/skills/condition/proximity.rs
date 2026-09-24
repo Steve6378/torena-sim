@@ -99,9 +99,10 @@ fn has_near_lane_runner(runner: &dyn RunnerView, direction: Direction) -> bool {
 
 /// Seconds with an uma right behind / ahead. On the live field this is the
 /// [`ConditionTimers`](crate::skills::condition::dynamic::ConditionTimers)
-/// duration (GameTora: 2.5 m and 1 lane, reset when the runner's own placement
-/// changes). Without one, the older proxy: the whole race clock while someone
-/// is near, which makes `>= 3` true on the first near tick after 3 s.
+/// duration (the uma one place behind / ahead, 2.5 m and 1 lane, reset when
+/// the runner's own placement changes). Without one, the older proxy: the
+/// whole race clock while any uma is near (the snapshots carry no placement),
+/// which makes `>= 3` true on the first near tick after 3 s.
 fn near_lane_time(runner: &dyn RunnerView, direction: Direction) -> f64 {
     if let Some(t) = runner.condition_timers() {
         return match direction {

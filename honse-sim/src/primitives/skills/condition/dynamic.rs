@@ -31,10 +31,17 @@ pub struct RunnerSnapshot {
 /// conditions whose value depends on history rather than on this tick alone.
 /// Definitions follow GameTora's skill-condition viewer (read 23 Sep 2026):
 ///
-/// * `near_behind` / `near_infront`: seconds with at least one uma no more than
-///   2.5 m behind / ahead and no more than 1 lane (1/18 of the course width, the
-///   engine's `horse_lane`) to either side; any uma counts, but the timer resets
-///   whenever the runner's own placement changes.
+/// * `near_behind` / `near_infront`: seconds with the uma directly behind /
+///   directly ahead in placement no more than 2.5 m behind / ahead and no more
+///   than 1 lane (1/18 of the course width, the engine's `horse_lane`) to
+///   either side; the timer resets whenever the runner's own placement
+///   changes. GameTora's note counts any uma; the mechanics doc (§
+///   behind_near_lane_time) and the recordings read only the adjacent one.
+///   The edges are GameTora's "no more than" (`<=`), where the doc writes
+///   `<` for both: on the recordings a pair one lane apart counts (see
+///   `update_condition_timers`), and the 2.5 m edge cannot be told. The lane
+///   edge holds up to rounding (1e-9 m of slack), so a pair one lane apart
+///   counts whichever side of 0.625 m its lanes' difference rounds to.
 /// * `near_behind_set1`: the same with 5 m and 2.7 lanes.
 /// * `blocked_front` / `blocked_side` / `blocked_all`: seconds blocked in front,
 ///   on at least one side, and both at once, continuously.
@@ -58,11 +65,11 @@ pub struct RunnerSnapshot {
 ///   this one.
 #[derive(Debug, Clone, Copy)]
 pub struct ConditionTimers {
-    /// Seconds with an uma right behind (2.5 m, 1 lane).
+    /// Seconds the uma one place behind has been within 2.5 m and 1 lane.
     pub near_behind: f64,
-    /// Seconds with an uma behind (5 m, 2.7 lanes).
+    /// Seconds the uma one place behind has been within 5 m and 2.7 lanes.
     pub near_behind_set1: f64,
-    /// Seconds with an uma right ahead (2.5 m, 1 lane).
+    /// Seconds the uma one place ahead has been within 2.5 m and 1 lane.
     pub near_infront: f64,
     /// Seconds blocked in front, continuously.
     pub blocked_front: f64,

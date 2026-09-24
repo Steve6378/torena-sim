@@ -287,11 +287,22 @@ pub fn build_field_snapshot(
 }
 
 /// `*_near_lane_time`: 2.5 m and 1 lane; `behind_near_lane_time_set1`: 5 m and
-/// 2.7 lanes (GameTora).
+/// 2.7 lanes (GameTora), both read on the placement-adjacent uma only.
 const NEAR_LANE_METERS: f64 = 2.5;
 const NEAR_LANE_LANES: f64 = 1.0;
 const NEAR_LANE_SET1_METERS: f64 = 5.0;
 const NEAR_LANE_SET1_LANES: f64 = 2.7;
+/// Slack on the near-lane windows' lane edges, in metres. A pair one lane
+/// apart sits on the edge only up to rounding: when its two lanes lie on
+/// either side of a power of two (1 m, 2 m, 4 m, 8 m), the spacing of doubles
+/// differs between them and the gap comes out a few 1e-16 m off one lane
+/// (up to 2.2e-16 m past it and 8.9e-16 m inside it over 2 rounds on the
+/// 117 races; half the spacing above 16 m, on the widest course's 16.875 m,
+/// is 1.8e-15 m).
+/// The slack is over 500,000 times that and under a millionth of the
+/// recordings' lane resolution (1/10000 of the course width, 1.125 mm), so
+/// it only decides which side of the edge a pair that is on it falls.
+const NEAR_LANE_EDGE_TOLERANCE: f64 = 1e-9;
 /// The `*_continue` conditions ignore the first 5 s of the race (GameTora).
 const ORDER_CONTINUE_GRACE_SECONDS: f64 = 5.0;
 
@@ -343,9 +354,64 @@ pub fn update_condition_timers(
             _ => 0,
         };
 
-        let mut near_behind = false;
-        let mut near_behind_set1 = false;
-        let mut near_infront = false;
+        // The umas directly behind and directly ahead in placement.
+        let adjacent = |offset: i64| {
+            order.and_then(|o| {
+                by_order
+                    .iter()
+                    .find(|e| snapshot.order.get(&e.id) == Some(&(o + offset)))
+                    .copied()
+            })
+        };
+        let (behind, ahead) = (adjacent(1), adjacent(-1));
+        // The near-lane timers read only those two (mechanics §
+        // behind_near_lane_time: "performed to the uma 1 place ahead/behind"),
+        // not any uma in the window as GameTora's note has it. On the 117
+        // recordings, 113 See Ya Later! carriers meet the condition only
+        // through another uma and 2 fired, where the wit roll expects 104;
+        // 200492, 49 carriers and 1 fired against 45. set1 reads the same
+        // way: 6 carriers of 900051 meet its precondition only through
+        // another uma, against 5.6 expected fires; one fired, 1.1 s before
+        // that reading would allow.
+        // The edges are GameTora's "no more than", where the mechanics doc's
+        // rule line reads abs(DistanceGap) < 2.5 m and abs(LaneGap) < 1
+        // HorseLane. The recordings tell the lane edge. They floor lanes to
+        // 1/10000 of the course width, so a pair one lane apart reads 555 or
+        // 556: 62 carriers of the near-lane skills meet the condition only if
+        // an adjacent uma at that offset counts, and 53 fired, where the wit
+        // roll expects 57.0 and `<` none. They cannot separate `<=` from `<`
+        // with the game's offset a hair inside one lane, but either way a pair
+        // at it counts.
+        // Here such pairs sit 0.625 m apart up to rounding (gates and the rail
+        // are multiples of it). `<=` alone keeps the ones a rounding error
+        // inside and drops the ones a rounding error past, so the lane edge
+        // takes NEAR_LANE_EDGE_TOLERANCE. Over 2 rounds on the 117 races, of
+        // 1,998,534 pair-ticks of umas adjacent by position within 2.5 m,
+        // 80,745 sit exactly one lane apart, 2,003 up to 8.9e-16 m inside it
+        // and 1,446 up to 2.2e-16 m past it, each of those 1,446 with its two
+        // lanes on either side of 1 m or 2 m; the slack takes them in. The
+        // 2.5 m edge takes no slack and cannot be told: no adjacent pair
+        // holds within 1 mm of it over two recorded frames, no engine
+        // pair-tick of those rounds comes within 1e-9 m of it, and a crossing
+        // is placed no better than a frame's change (552 of the 1,280 fired
+        // runs entered within one of it, median 0.62 m). set1's 2.7-lane edge
+        // decides no carrier on the recordings, and no engine pair-tick of
+        // those rounds within 5 m comes within 1e-9 m of it.
+        // `sign` is -1 behind, +1 ahead.
+        let near_lane = |other: Option<&SnapEntry>, sign: f64, meters: f64, lanes: f64| {
+            other.is_some_and(|other| {
+                let gap = sign * (other.position - me.position);
+                let across = (other.current_lane - me.current_lane).abs();
+                gap > 0.0
+                    && gap <= meters
+                    && across <= lanes * horse_lane + NEAR_LANE_EDGE_TOLERANCE
+            })
+        };
+        let near_behind = near_lane(behind, -1.0, NEAR_LANE_METERS, NEAR_LANE_LANES);
+        let near_behind_set1 = near_lane(behind, -1.0, NEAR_LANE_SET1_METERS, NEAR_LANE_SET1_LANES);
+        let near_infront = near_lane(ahead, 1.0, NEAR_LANE_METERS, NEAR_LANE_LANES);
+        let behind_is_inner = behind.is_some_and(|b| b.current_lane < me.current_lane);
+
         let mut side_blocked = false;
         let mut has_target = false;
         let mut is_target = false;
@@ -353,18 +419,6 @@ pub fn update_condition_timers(
         for other in snapshot.entries.iter().filter(|e| e.id != me.id) {
             let along = other.position - me.position;
             let across = (other.current_lane - me.current_lane).abs();
-            if along < 0.0 && -along <= NEAR_LANE_METERS && across <= NEAR_LANE_LANES * horse_lane {
-                near_behind = true;
-            }
-            if along < 0.0
-                && -along <= NEAR_LANE_SET1_METERS
-                && across <= NEAR_LANE_SET1_LANES * horse_lane
-            {
-                near_behind_set1 = true;
-            }
-            if along > 0.0 && along <= NEAR_LANE_METERS && across <= NEAR_LANE_LANES * horse_lane {
-                near_infront = true;
-            }
             if is_side_blocking(along, across, horse_lane) {
                 side_blocked = true;
             }
@@ -381,13 +435,6 @@ pub fn update_condition_timers(
                 is_target = true;
             }
         }
-        let behind_is_inner = order
-            .and_then(|o| {
-                by_order
-                    .iter()
-                    .find(|e| snapshot.order.get(&e.id) == Some(&(o + 1)))
-            })
-            .is_some_and(|behind| behind.current_lane < me.current_lane);
 
         let t = tracker.condition_timers.entry(me.id).or_default();
         let step = |held: bool, value: f64| if held { value + dt } else { 0.0 };
@@ -922,6 +969,111 @@ mod tests {
         let t = tick(&mut pair(2.0, 1.5, (1, 2), (1, 2)), &mut tracker);
         assert_eq!(t.near_behind, 0.0, "1.5 lanes is outside the 1-lane window");
         assert!(t.near_behind_set1 > 0.0, "but inside set1's 2.7 lanes");
+    }
+
+    /// The near-lane timers read the uma directly behind / directly ahead in
+    /// placement, not any uma in the window: a third-placed uma 2 m behind in
+    /// the leader's lane is not "behind" the leader while the second-placed
+    /// uma between them runs three lanes out.
+    #[test]
+    fn near_lane_timers_read_only_the_placement_adjacent_uma() {
+        // 1 at 100 m; 2 one metre behind, `lanes_2` lanes out; 3 two metres
+        // behind in 1's lane. Placements 1, 2, 3, unchanged.
+        let field = |lanes_2: f64| {
+            let one = entry(1, 100.0, Strategy::FrontRunner);
+            let mut two = entry(2, 99.0, Strategy::PaceChaser);
+            let three = entry(3, 98.0, Strategy::PaceChaser);
+            two.current_lane = lanes_2 * LANE;
+            let mut snap = snapshot(vec![one, two, three]);
+            for id in 1..=3 {
+                snap.order.insert(RunnerId(id), i64::from(id));
+                snap.previous_order.insert(RunnerId(id), i64::from(id));
+            }
+            snap
+        };
+        let timers = |snap: &mut FieldSnapshot, id: u32| {
+            update_condition_timers(snap, &mut FieldOrderTracker::new(), &[], DT, LANE);
+            snap.condition_timers[&RunnerId(id)]
+        };
+
+        // 2 runs three lanes out: 3 is in 1's windows, but not adjacent.
+        let t = timers(&mut field(3.0), 1);
+        assert_eq!(t.near_behind, 0.0, "3 is not directly behind");
+        assert_eq!(t.near_behind_set1, 0.0, "nor for set1 (5 m, 2.7 lanes)");
+        let t = timers(&mut field(3.0), 3);
+        assert_eq!(t.near_infront, 0.0, "1 is not directly ahead");
+
+        // 2 comes within a lane: now the adjacent uma is in the windows.
+        let t = timers(&mut field(0.5), 1);
+        assert!(t.near_behind > 0.0, "2 is directly behind");
+        assert!(t.near_behind_set1 > 0.0);
+        let t = timers(&mut field(0.5), 3);
+        assert!(t.near_infront > 0.0, "2 is directly ahead");
+    }
+
+    /// An uma exactly one lane to the side is inside the near-lane window,
+    /// GameTora's "no more than 1 lane" (the mechanics doc's rule line reads
+    /// `<`). On the 117 recordings 62 carriers meet the condition only if an
+    /// adjacent uma one lane off counts, and 53 fired, where the wit roll
+    /// expects 57.0. Off the rail by one lane, as here, the offset is exact.
+    #[test]
+    fn near_lane_timers_count_an_uma_exactly_one_lane_off() {
+        let timers = |lanes: f64| {
+            // 1 on the rail, 2 two metres behind and `lanes` lanes out.
+            let mut snap = pair(2.0, lanes, (1, 2), (1, 2));
+            update_condition_timers(&mut snap, &mut FieldOrderTracker::new(), &[], DT, LANE);
+            (
+                snap.condition_timers[&RunnerId(1)].near_behind,
+                snap.condition_timers[&RunnerId(2)].near_infront,
+            )
+        };
+        let (behind, infront) = timers(1.0);
+        assert!(behind > 0.0, "2 is right behind 1, one lane out");
+        assert!(infront > 0.0, "1 is right in front of 2, one lane in");
+        assert_eq!(timers(1.01), (0.0, 0.0), "past one lane");
+    }
+
+    /// One lane off counts up to rounding, on the real course's 0.625 m lane:
+    /// one ulp past it, and one lane outside an uma at 1.7 m, which crosses
+    /// 2 m and reads 0.6250000000000002 m from her. `<=` alone dropped both;
+    /// a micrometre past one lane is still past it.
+    #[test]
+    fn near_lane_timers_count_one_lane_off_up_to_rounding() {
+        const HORSE_LANE: f64 = 11.25 / 18.0;
+        let timers = |lane_1: f64, lane_2: f64| {
+            // 1 in `lane_1`, 2 two metres behind in `lane_2`.
+            let mut snap = pair(2.0, 0.0, (1, 2), (1, 2));
+            snap.entries[0].current_lane = lane_1;
+            snap.entries[1].current_lane = lane_2;
+            update_condition_timers(
+                &mut snap,
+                &mut FieldOrderTracker::new(),
+                &[],
+                DT,
+                HORSE_LANE,
+            );
+            (
+                snap.condition_timers[&RunnerId(1)].near_behind > 0.0,
+                snap.condition_timers[&RunnerId(2)].near_infront > 0.0,
+            )
+        };
+        assert_eq!(HORSE_LANE, 0.625);
+        assert_eq!(
+            timers(0.0, HORSE_LANE.next_up()),
+            (true, true),
+            "one ulp past"
+        );
+        let outside = 1.7 + HORSE_LANE;
+        assert!(
+            outside - 1.7 > HORSE_LANE,
+            "1.7 + 0.625 reads past one lane"
+        );
+        assert_eq!(timers(1.7, outside), (true, true), "one lane outside 1.7 m");
+        assert_eq!(
+            timers(0.0, HORSE_LANE + 1e-6),
+            (false, false),
+            "a micrometre past"
+        );
     }
 
     /// The side-block timers read the mechanics doc's window (§ Side
