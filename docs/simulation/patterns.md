@@ -4,7 +4,7 @@
 
 The `honse-sim` crate contains shared primitives and two engine modules. Each engine resolves `FieldInputs`, then calls the same runner step kernel. The kernel does not inspect the engine or ask if a live field exists.
 
-Each tick uses a fixed duration of 1/15 second. Each round uses a deterministic seed and resets reusable state before the first tick.
+Each tick uses a fixed duration of 0.0666 s, the game's tick (`FRAME_DT`; mechanics § Frame Rate), and the race clock sums it in float32 as the game's does. Each round uses a deterministic seed and resets reusable state before the first tick.
 
 ## Contested engine
 

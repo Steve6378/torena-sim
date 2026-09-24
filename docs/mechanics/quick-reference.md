@@ -56,23 +56,28 @@ The closed forms above — `MaxHP = 0.8 * StrategyCoefficient * Stamina + Distan
 - ✅ Wit-based activation chance: `max(100 - 9000/BaseWitStat, 20)%`
 - ✅ Uses **base `Wit`** (not affected by `Wit` proficiency/skills)
 - ✅ Course distance scaling for duration/cooldown
+- ✅ Cooldown starts when the effect ends, in whole ticks: a skill first fired on tick `n1` can fire again from tick `n1 + ceil(duration / 0.0666) + ceil(cooldown / 0.0666)` (43 recorded repeats; README § Skill Cooldown)
+- ✅ Alternatives checked in data order; the first that holds fires, once, with one wit roll and one cooldown for all (README § Skill Alternatives)
 - ✅ Skill level multipliers (`1.0x` to `1.25x` for `SpeedStat`)
 - ✅ Green skills bypass Wit check
 - ✅ Unique rarity skills bypass Wit check
 
 ### Skill Conditions
 
+- ✅ A condition that holds fires on that tick; the live-race tokens (near_count, is_overtake, the near-lane / blocked / overtake timers, is_move_lane, compete_fight_count, ...) are checked every tick of their window (README § Skill Conditions)
 - ✅ `x_random` (10m segment selection)
-- ✅ `straight_random`, `corner_random`, `all_corner_random`
+- ✅ `straight_random`, `corner_random`, `all_corner_random` (a tick that passes one trigger checks the next on the same tick)
 - ✅ `phase_corner_random`
 - ✅ `phase` (checked before phase update)
 - ✅ `remain_distance` (floor-based, can trigger at `398.000001` for `≥399`)
+- ✅ `accumulatetime` (race clock from `0` at the gate: `>=5` opens on tick 76, `>=10` on tick 151)
 - ✅ `order_rate` conversion with rounding
-- ✅ `order_rate_inXX_continue` (first 5s don't count)
+- ✅ `order_rate_inXX_continue` / `order_rate_outXX_continue` (first 5s of the race clock don't count; in `order <= round(n × XX%)`, out `order >= round(n × XX%)`)
 - ✅ `near_count` (`3m` distance, `3` horse lanes) - **1st anniversary values**
-- ✅ `is_surrounded`
-- ✅ `behind_near_lane_time`, `infront_near_lane_time`
-- ✅ `activate_count_x` (ID order matters)
+- ✅ `is_surrounded` (front and behind `<3m`, `<1.5` horse lanes; outside `<1.5m`, `0<LaneGap<3` horse lanes)
+- ✅ `behind_near_lane_time`, `infront_near_lane_time` (the placement-adjacent uma; `2.5m` and `1` horse lane, a pair exactly one lane apart counting on the recordings, both edges read `<=` by the engine; reset on the runner's own placement change; 3 s on the 46th tick)
+- ✅ `activate_count_x` (skills checked in ascending ID order)
+- ✅ `change_order_up_*` (umas passed in the window), `temptation_count` (own rushed spells), `distance_diff_rate` (share of the leader-to-last spread), `running_style_count_same[_rate]` (a Runaway counts as a Front Runner; rate in %), `post_number` (JRA gate block), `running_style_equal_popularity_one` (the popularity-1 uma), `lane_type` (course widths 0.2/0.4/0.6), `is_move_lane` (1 inward, 2 outward), `is_activate_any_skill` (another skill this tick or the last) (README § Other condition tokens)
 
 ### Skill Types & Effects
 
@@ -85,7 +90,7 @@ The closed forms above — `MaxHP = 0.8 * StrategyCoefficient * Stamina + Distan
 - ✅ `LaneMovementSpeed` (lane movement speed)
 - ✅ `Recovery` skills (HP recovery)
 - ✅ `StartDelay` modifiers
-- ❌ Activate random gold skills - Not in Global yet
+- ✅ Activate random gold skills (`ActivateRandomGold`, e.g. `110071`, carried in the tournament recordings); the engine counts a skill as one candidate whatever its alternatives (its choice: the recordings cannot show it)
 - ❌ Evolution skill duration scaling - Not in Global yet
 
 ### Value Scaling Types
@@ -126,10 +131,10 @@ The tiered usages (2, 3-7, 10, 12, 13, 24) all top out at 1.2×, and the extract
 - ✅ Initial lane by `GateNumber`
 - ✅ Lane change speed (`PowerStat`-based, with acceleration)
 - ✅ Target lane strategies: `Normal`, `Overtake`, `Fixed`
-- ✅ Overtake targets (`1-20m` ahead, catchable in `15s`)
+- ✅ Overtake targets (`1-20m` ahead, inside the vision cone, catchable in `15s`); `is_overtake` and the overtake timers read the same list
 - ✅ **Extra move lane (`FinalCorner`)** - 1st anniversary change
   - Previously activated on final straight
-- ✅ Front/side `Blocking`
+- ✅ Front/side `Blocking` (side: `<1.05m`, `<2` horse lanes, also for `blocked_side*` / `blocked_all*`)
 - ✅ `Overlapping` (`0.4m` bump)
 - ✅ `VisionCone` (`20m` default, `11.5` horse lane width)
 
@@ -161,7 +166,7 @@ The tiered usages (2, 3-7, 10, 12, 13, 24) all top out at 1.2×, and the extract
 
 - ✅ Pre-race `Wit` roll: `(6.5/log10(0.1*Wit+1))²%`
 - ✅ Restraint skill: `-3%` flat (ID 202161), modeled via effect type 29 (`RushedChance`)
-- ✅ Random section `2-9` activation
+- ✅ Random section `2-9` activation (counted from 1; 143 of 143 recorded spells)
 - ✅ `1.6x` HP consumption modifier
 - ✅ Forces position keep mode, auto-passes `Wit` checks
 - ✅ `55%` escape chance every `3s`, max `12s`
@@ -187,6 +192,7 @@ Real-data amendments from [hakuraku.moe/notes/dueling](https://hakuraku.moe/note
 
 - ✅ `FinalStraight` only; no strategy exclusion (front runners can duel)
 - ✅ 2+ Uma within `3.0m`, `0.25` course width for `2s` — the 2s window applies to **proximity only**; during the window only the **target** must be on the final straight (initiator checked at trigger frame)
+- ✅ The 2s window is timed **per target** and counted in whole ticks: a duel starts on a target in the box for more than 30 ticks
 - ✅ Trigger-frame checks (single frame after the window): both ≥15% HP, speed gap `<0.6 m/s`, at least **one** of the pair in the top 50% (that uma is the target)
 - ✅ Speed: `(200*GutsStat)^0.708 * 0.0001` m/s
 - ✅ Accel: `(160*GutsStat)^0.59 * 0.0001` m/s²
@@ -262,11 +268,12 @@ Real-data amendments from [hakuraku.moe/notes/dueling](https://hakuraku.moe/note
 
 ## Misc Details ✅
 
-- ✅ Frame rate: 0.0666s (15 FPS)
+- ✅ Frame rate: 0.0666s (15 FPS); the race clock is a float32 sum, `t(n+1) = f32(t(n) + f32(0.0666))`, `t(0) = 0` at the gate
 - ✅ 24 sections per race
 - ✅ 4 phases [EarlyRace: 0, MidRace: 1, LateRace: 2, LastSpurt: 3]
 - ✅ 1 Bashin = `2.5m`
+- ✅ Finish time: the crossing inside the tick, `t(n) - (p(n) - D) / (p(n) - p(n-1)) * 0.0666` in float32; umas who cross on one tick are placed by it
 - ✅ Display time: `actualTime * 1.18`
-- ✅ Position recording: `1s` intervals (or every frame `<1s` or `<25m` from goal)
-- ✅ Skills activate in ID order
+- ✅ Position recording: `1s` intervals, 16 ticks on the recordings (or every frame `<1s` or `<25m` from goal)
+- ✅ Skills activate in ascending ID order
 - ✅ Target speed cap: `30 m/s`

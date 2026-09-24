@@ -102,6 +102,8 @@ Beware that some mechanics and bugs differ based on your respective server. You 
 
 [Skill Cooldown](#skill-cooldown)
 
+[Skill Alternatives](#skill-alternatives)
+
 [Skill Conditions](#skill-conditions)
 
 [x_random](#x_random)
@@ -118,6 +120,8 @@ Beware that some mechanics and bugs differ based on your respective server. You 
 
 [remain_distance](#remain_distance)
 
+[accumulatetime](#accumulatetime)
+
 [order_rate, order_rate_inXX_continue](#order_rate,-order_rate_inxx_continue)
 
 [near_count](#near_count)
@@ -127,6 +131,8 @@ Beware that some mechanics and bugs differ based on your respective server. You 
 [behind_near_lane_time, infront_near_lane_time](#behind_near_lane_time,-infront_near_lane_time)
 
 [activate_count_x](#activate_count_x)
+
+[Other condition tokens](#other-condition-tokens)
 
 [Skill Target](#skill-target)
 
@@ -262,8 +268,14 @@ Beware that some mechanics and bugs differ based on your respective server. You 
 
 The races are simulated at 0.0666s per tick (about 15 frames per second).
 
+> Capture finding (patch 0037; [capture findings](capture-findings.md#the-games-tick-and-clock)): the race clock is this tick summed in float32, t(0) = 0 at the gate and t(n+1) = float32(t(n) + float32(0.0666)). On the 117 tournament recordings all 15,840 frame times and all 22,617 event times (20,874 skill activations, 248 CompeteTop, 533 CompeteFight, 962 ReleaseConservePower) are values of that sum, bit for bit; a float32 or float64 sum of 1/15 s, or 0.0666n in float64, matches only the 117 frames at t = 0 and the 4,271 skill events there. The motion steps the same tick: over 20,074 pairs of per-tick frames at constant speed, distance over speed has median 0.0666123 s, 73.7% of them within 2e-5 of 0.0666 and none within 2e-5 of 1/15. The sum reads 5.0616 s on tick 76, 10.0566 s on tick 151 and 94.97075 s on tick 1426, 0.85 ms behind 0.0666n there.
+>
+> The engine steps this tick (`TICK_SECONDS`, 0.0666 in float32; `FRAME_DT`, its float64 widening, 0.066600002348423 s) and keeps its race clock as the same float32 sum (`RaceClock`); speed, position, HP, lanes and every timer still integrate in float64. A rule stated here in seconds converts through the tick: a 3 s timer that sums the tick holds on its 46th tick (45 ticks give 2.997 s), position keeping checks every 31 ticks and 46 ticks after an exit, and a rushed spell's snap-out marks fall on its ticks 46, 91 and 136 and the 12 s cap on tick 181. A rule stated per frame keeps its count (the one-frame acceleration). The duel window is a seconds rule counted in whole ticks: more than 2 s is more than 30 ticks (2 / 0.0666 = 30.03), the count it had on a 1/15 s tick. Until patch 0037 the engine stepped 1/15 s and summed its clock in float64.
+
 For the purpose of replay, the game records uma’s position each frame within 1 second of race start, or when a uma is within 25m before goal. Otherwise positions are recorded at 1 second intervals.
 (There used to be a visual bug where the winner seemed to lose in replay due to low accuracy recording. The 25m before goal part was introduced then as a fix.)
+
+> Capture finding: on the 117 tournament recordings the one-second interval is 16 ticks (1.0656 s). Consecutive frames are 1 tick apart (5,983 gaps) or 16 ticks apart (9,740 gaps), and each frame holds the game's own values at its tick.
 
 ## Section {#section}
 
@@ -630,7 +642,25 @@ Duration=BaseDuration\*CourseDistance\[m\]/1000
 Many skills have a cooldown time. The actual cooldown time of a skill scales with course distance.
 Cooldown=BaseCooldown\*CourseDistance\[m\]/1000
 
+> Capture finding (patches 0032 and 0037; [capture findings](capture-findings.md#a-skills-cooldown-starts-when-its-effect-ends)): the cooldown starts when the effect ends, and both are counted in whole ticks. The effect ends on the first tick its duration has run, the cooldown counts whole ticks from that tick, and from there the skill fires on the first tick its condition holds. A skill first fired on tick n1 can fire again from tick n1 + ceil(Duration / 0.0666) + ceil(Cooldown / 0.0666). This matters for the skills that re-arm: a single-window skill whose window outlasts its cooldown, and all_corner_random at a later trigger.
+>
+> The 117 tournament recordings hold 43 repeats (one runner firing one skill twice: 201662 22, 200331 12, 201651 5, 200332 3, 200342 1). All 43 come after activation + Duration + Cooldown, none between activation + Cooldown and that point, and none before the tick above. Three See Ya Later! (201662) repeats whose condition already held fired exactly on it: 1290 = 118 + 1172 ticks after the first firing at 2600 m (10908-r0039 runner 2), 794 = 73 + 721 at 1600 m (10611-r0077 runner 0) and 992 = 91 + 901 at 2000 m (10104-r0045 runner 2). That is one tick after the tick on which Duration + Cooldown has elapsed, where a comparison of times would fire. 10504-r0065 runner 6 (2000 m) fired on it, 992 ticks after, whatever her condition did, so the ready tick comes no later.
+>
+> One other form fits all 43: n1 + ceil((Duration + Cooldown) / 0.0666) + 1. It comes a tick later only where the two remainders sum past a tick. Among the skills that can re-arm in a race (a 30 s base cooldown; the others have 500 s), that happens on the recorded courses for the 3 s skills at 1700 m, the 1.8 s skills 200461 and 200462 at 1400, 1700 and 1800 m (200462 has 37, 27 and 59 carriers there) and the 2.4 s corner skills (200331, 200332) at 1400 to 1800 m. No recorded repeat decides there (the one at 1700 m fired 8 ticks late on its own timer, every corner repeat is at 2500 or 3200 m, and 200461 and 200462 never repeat on the recordings), so which form the game uses is not determined; the engine transcribes the first. Duration is the duration applied (the skill's longest effect, 0 for an instant one). No skill that re-arms scales its duration, so the recordings cannot tell it from the base duration.
+
+## Skill Alternatives {#skill-alternatives}
+
+A skill's data can hold several alternatives, each with its own precondition, condition, duration and effects.
+
+> Capture finding (patch 0027; [capture findings](capture-findings.md#a-skills-alternatives-the-first-that-holds-fires)): the game checks a skill's alternatives in order on every tick and fires the first that holds, once. One wit roll serves them all, and after either fires the others wait out the same cooldown; without a cooldown the skill is spent. The recordings' skill events carry the alternative's index (params\[3\]). It matches the base-power split of 202331 and 202332 in 131 of 131 activations, and 117 activations over 23 skills went through a second alternative. 110101 fired through its second (the one without the distance_diff_top term) in 10 of its 25 activations; its second alternative's order 2 to 5 at 200 m remaining predicts 55 of its 56 carriers. Until patch 0027 the engine kept only the first alternative with a live window.
+>
+> The engine's choice, not a finding: a skill that ActivateRandomGold forces counts as one candidate, whatever alternatives or second stage (is_activate_other_skill_detail) it has, and is forced through its first alternative. The recordings cannot show it: none of the 4 carriers of 110071/910071 on them holds such a skill.
+
 ## Skill Conditions {#skill-conditions}
+
+> Capture finding (patch 0035; [capture findings](capture-findings.md#a-condition-fires-on-the-tick-it-first-holds)): a skill fires on the first tick, inside its window, on which its condition holds, with no lag of its own. accumulatetime\>=5 skills first fire on tick 76 and accumulatetime\>=10 skills on tick 151, the first ticks whose clock reaches 5 and 10 s. Now We're Cruisin'! (100341, and its inherited 900341, gated on compete_fight_count\>0) fired one recorded tick after the carrier's own first duel event in all 15 of its firings; every carrier who dueled fired, and none who did not. Uma Stan (201591, near_count\>=3\&accumulatetime\>=5) fired for 424 of its 486 carriers, 252 of them on tick 76.
+>
+> Engine: until patch 0035 the 23 condition tokens that only the live race can resolve (near_count, is_overtake, the near-lane, blocked and overtake timers, is_move_lane, compete_fight_count and others) were armed at a random point drawn into their window (an Erlang offset, or a uniform point for compete_fight_count) and checked from there. The contested engine now checks them on every tick of every region of their window. The vacuum engine, which runs no field, keeps the random points: there the tokens fall back to static filters that hold everywhere, and checking them from the first tick would fire every sample at the window's start.
 
 ### x_random {#x_random}
 
@@ -656,6 +686,8 @@ Up to 4 triggers are placed in the race, and the condition is fulfilled if uma i
 5. Remove all candidate corners before the one selected.
 6. Go to step 2, repeat until 4 triggers are placed, or no candidate remains.
 
+> Engine (patch 0036; [capture findings](capture-findings.md#passing-a-window-checks-the-next-on-the-same-tick)): the condition is checked against the trigger the uma is in on every tick. A tick that carries her past one trigger into the next checks the next on that same tick, as the rule above has it ("within one of the triggers"). The same holds for the regions of a live condition's window. The engine used to move on to the next trigger and skip that tick. The census on the 117 tournament recordings is identical before and after the change.
+
 #### phase_corner_random {#phase_corner_random}
 
 All the corner segments in the corresponding phase are “stitched together” before the trigger is placed. This means the probability of the skill triggering in a specific corner is proportional to its length.
@@ -670,12 +702,22 @@ A skill with the condition phase==1\&corner==0 (such as the original Smart Falco
 
 The remaining distance condition is calculated by subtracting the course distance (an integer) by the uma’s current position rounded down. So remain_distance\>=399 can actually trigger at remain_distance\>=398.000001.
 
+### accumulatetime {#accumulatetime}
+
+The race time in seconds since the gate opened (GameTora: "the number of seconds since the race has started").
+
+> Capture finding (patches 0035 and 0037; [capture findings](capture-findings.md#the-race-clock-starts-at-the-gate)): the clock is the race's own float32 clock of [Frame Rate](#frame-rate), 0 at the gate. accumulatetime\>=N first holds on the first tick whose clock reads N s or more: tick 76 (5.0616 s; tick 75 reads 4.995 s) for 5 and tick 151 (10.0566 s; tick 150 reads 9.990 s) for 10. On the 117 tournament recordings 376 of the 999 first firings of accumulatetime\>=5 skills fall on tick 76 and 25 of the 1,094 of accumulatetime\>=10 skills on tick 151, none earlier. The engine's runner clock started at -1 s until patch 0035, so these opened a second late.
+
 ### order_rate, order_rate_inXX_continue {#order_rate,-order_rate_inxx_continue}
 
 Order rate condition is converted to order condition, rounding to the nearest.
 For example, consider order_rate\>50 in a 9-uma race. 9\*50%=4.55. The condition is then converted to order\>5 and can only trigger when 6th place or below.
 
 order_rate_inXX_continue requires an uma to remain in top XX% until skill activation. The first 5 seconds in the race do not count.
+
+> Capture finding (patch 0028; [capture findings](capture-findings.md#the-order_rate-out-bands-keep-the-threshold-place)): the threshold place counts on both sides. With threshold = round(n × XX%), order_rate_inXX_continue holds while order \<= threshold and order_rate_outXX_continue ("worse than the top XX%") while order \>= threshold, as in GameTora's examples (10 umas: in20 is 2nd or better; 9 umas: out70 is 6th or worse). On the 117 tournament recordings (12 umas, so out70 is 8th or worse), a band held from 5 s to the check admits 32 of 110611's 36 carriers under \>=, 31 of them fired and none fired outside it; \> admits 23 and 8 fired outside it. 910611: \>= admits 17 and all 17 fired; \> admits 10 and 7 fired outside it. The in side keeps \<=: of 100641's (in20) 22 carriers, \<= admits 13 and 11 fired, none outside; \< admits 1 and 10 fired outside it. The out40 and out50 carriers do not separate the two readings. The engine read the out side as order \> threshold until patch 0028.
+>
+> The 5 seconds are the race clock's first 5 s from the gate (patch 0035); the engine counted them from -1 s before.
 
 ### near_count {#near_count}
 
@@ -694,6 +736,8 @@ Out: abs(DistanceGap)\<1.5m;0\<LaneGap\<3HorseLane
 Front: 0\<DistanceGap\<3.0m;abs(LaneGap)\<1.5HorseLane
 Behind: \-3.0m\<DistanceGap\<0;abs(LaneGap)\<1.5HorseLane
 
+> Engine (patch 0026): transcribed as written. The engine had read 1 horse lane in front and behind and had no Out clause. The recordings cannot test it: 3 carriers (200481 fired for 1 of 2, 200482 for 0 of 1).
+
 ### behind_near_lane_time, infront_near_lane_time {#behind_near_lane_time,-infront_near_lane_time}
 
 A uma is considered closely behind if
@@ -702,9 +746,34 @@ abs(LaneGap)\<1HorseLane
 
 This check is performed to the uma 1 place ahead/behind the uma in question. Skills use a timer of how long this condition has been continuously fulfilled as a trigger. The timers reset if the uma’s placement changes.
 
+> Capture finding (patch 0031; [capture findings](capture-findings.md#near-lane-timers-the-placement-adjacent-uma-one-lane-inclusive)): a pair exactly one horse lane apart counts, and the engine reads the lane edge above as abs(LaneGap)\<=1HorseLane, GameTora's "no more than 1 lane". The recordings floor lanes to 1/10000 of the course width, so such a pair reads 555 or 556 units. 62 carriers of the near-lane skills meet the condition only if an adjacent uma at that offset counts, and 53 of them fired, where the wit roll expects 57.0 and a strict \< on the recorded offset expects none. The recordings cannot tell whether the game's own offset sits a hair inside one lane, so they do not separate \<= from \< there; either way a pair at it counts. The 2.5 m edge is not decided by the recordings (no adjacent pair holds within 1 mm of it over two recorded frames); the engine takes GameTora's "no more than" there too (\<= 2.5 m). behind_near_lane_time_set1 reads 5 m and 2.7 lanes (GameTora) the same way.
+>
+> The check reads the placement-adjacent uma, as written here, not GameTora's "any uma in the window". 113 See Ya Later! (201662) carriers meet the condition only through a non-adjacent uma and 2 of them fired, where the wit roll expects 104.2; 201651: 17 carriers and 1 fired against 15.6; 201661: 13 and 1 against 12.0; 200492: 49 and 1 against 45.2. Read on the adjacent uma the condition predicts 62.8% of 201662's 1167 carriers firing (tape 62.2%); read on any uma, 71.8%. Until patch 0031 the engine read any uma.
+>
+> Timing on the game's tick: the timer sums the 0.0666 s tick, so 3 s is reached on the 46th tick in the window (45 ticks give 2.997 s). First firings on the recordings come 46 ticks after an adjacent uma enters the window along the course (89 of 107) and 48 ticks after the runner's own placement changes (46 of 50). The engine gives 46 (321 of 322) and 47 (183 of 185): its timer reads 0 on the tick the new placement is first seen, one tick short of the recordings. This section says only that the timers reset when placement changes; a placement read one tick late and a reset held one tick longer both give 48, so the game's second tick is not determined and is not transcribed.
+
 ### activate_count_x {#activate_count_x}
 
 Skill activations are checked in the order of their IDs. This means a skill with a lower ID can trigger a skill with a higher ID on the same frame, but not the other way around.
+
+> Capture finding (patch 0026; [capture findings](capture-findings.md#skills-are-checked-in-ascending-id-order)): the order is ascending. On the 117 tournament recordings, 920011 (is_activate_any_skill) fires on the frame one of the runner's lower-id skills fires in 5 of 5 activations, and 120011 one frame after a higher-id one in 10 of 10. The engine walked the pending skills from the highest id down until patch 0026.
+
+### Other condition tokens {#other-condition-tokens}
+
+The tokens below follow GameTora's definitions (the reference the doc points to in [Skills](#skills)). The engine read the first nine differently until patch 0026; the last three rows point to the sections whose rules they read. The numbers are from the 117 tournament recordings ([capture findings](capture-findings.md#condition-tokens-read-as-gametora-defines-them)).
+
+- change_order_up_middle, change_order_up_end_after, change_order_up_finalcorner_after: the number of umas the runner has passed (ahead of her on the previous tick, behind her on this one) during the Mid-Race, since the Late-Race began, and since the final corner began. Passes counted since 2/3 of the course split firing: 58 of 59 carriers against 0 of 14 (100191, \>=2) and 29 of 31 against 0 of 25 (900171, \>=3).
+- temptation_count: the runner's own number of rushed spells so far. Carriers of skills gated on temptation_count==0 fired 0 of 44 times after a rush of their own; 142 of the 384 who never rushed fired.
+- distance_diff_rate: the runner's gap to the leader as a percentage of the field's spread, leader to last. 56 of 62 carriers whose window met it fired, 0 of 18 whose window never did.
+- running_style_count_same, running_style_count_same_rate: the runners sharing her running style, herself included, as a count and as a percentage of the field; a Runaway counts as a Front Runner. 200282 (\>=40): 39 of 39 carriers fired at 40% or more, 0 of 18 below.
+- post_number: the starting-gate block, not the gate. Up to 8 runners, one gate a block; with 9 to 16, the first 16 - n blocks hold one gate and the rest two (12 runners: gates 1-4 are blocks 1-4, then 5, 5, 6, 6, 7, 7, 8, 8); 17 runners put three gates in block 8, 18 three in blocks 7 and 8. 200252 (\<=3): 7 of 7 fired against 0 of 16; 200262: 59 of 59 against 0 of 56.
+- running_style_equal_popularity_one: her running style is that of the most popular uma. 200292: 13 of 13 carriers sharing that style fired, 0 of 10 others.
+- lane_type: the lane in course widths, inner (0) \<= 0.2 \< middle (1) \<= 0.4 \< outer (2) \<= 0.6 \< outside (3). All 40 activations of 200752 (lane_type==0) come at 0.2 course widths or less on the frame before.
+- is_move_lane: 1 while moving toward the inner fence, 2 while moving away. Every carried skill accepts either, so the recordings cannot separate them.
+- is_activate_any_skill: another of the runner's skills fired on this tick or the last. All 15 activations of 120011/920011 come on the tick of another of the runner's activations or the next one.
+- compete_fight_count: the runner's own Showdowns ([Dueling](#dueling)); see [Skill Conditions](#skill-conditions) for its timing.
+- is_overtake, overtake_target_time, overtake_target_no_order_up_time: read the overtake target list of [Overtake Targets](#overtake-targets), vision cone included.
+- blocked_side_continuetime, blocked_all_continuetime: time on the window of [Side Blocking](#side-blocking).
 
 ## Skill Target {#skill-target}
 
@@ -1012,6 +1081,8 @@ The first step is determining which strategy to use. There are 3 strategies: nor
 
 To enter overtake mode, there must be overtake targets. Overtake targets are all visible uma between 1-20 m in front, whose distance gap divided by speed gap is less than 15 \- meaning she can be caught up within 15 seconds at current speed difference \- and either has a lower target speed than yours, or be blocked and has a lower current speed than your target speed. The closest uma blocking in front is also automatically an overtake target.
 
+> Capture finding (patch 0030; [capture findings](capture-findings.md#overtake-targets-the-lane-list-with-the-vision-cone)): the skill conditions is_overtake, overtake_target_time and overtake_target_no_order_up_time read this same list, vision cone included, not GameTora's note ("up to 20 meters ahead, caught within 15 seconds"), which leaves the cone out. On the 117 tournament recordings GameTora's reading predicts 79.6 / 86.1 / 86.5 / 92.0% firing for 210111 / 202401 / 202402 / 202472 and the cone 49.8 / 82.4 / 80.0 / 88.3%, against 54.1 / 79.7 / 80.4 / 85.6% fired. Carriers that held a target and did not fire: 75 against 36.5 expected from the wit roll under GameTora's reading, 46 against 33.9 under the cone. The target-speed clause cannot be seen on the recordings and is kept because it is this section's rule. overtake_target_no_order_up_time (910031, 30 carriers, 2 fired) is not settled at the recordings' frame spacing.
+
 ### Normal Mode {#normal-mode}
 
 Normal mode is used when there are no overtake targets, or when uma is within 200m before the [move lane point](#course-events) during early-race or mid-race.
@@ -1086,6 +1157,8 @@ abs(LaneGap)\<2HorseLane
 The uma with lowest lane gap determines how much space is available for movement.
 
 Certain skills require being blocked on “all” sides. It means being blocked in front and on at least one side.
+
+> Capture finding (patch 0029; [capture findings](capture-findings.md#side-blocking-the-docs-window)): the skill timers blocked_side_continuetime and blocked_all_continuetime run on this window, the one the physics step reads; a rival on the same line counts. The engine's timers had used 3 m along and one horse lane across. On the 117 tournament recordings, 201271/201272 fire at 5.06 s, the first tick accumulatetime\>=5 allows, when already side-blocked for 2 s: with side geometry at the 3.20 s and 4.26 s frames, this window flags 132 of the 366 carriers and 87 of them fired before 5.2 s, against 5 of the 234 unflagged; the 3 m / 1 lane window flags 76 (21 fired early) and 71 of the 290 it leaves out fired early. Moving the edges, 1.75 lanes flags 73 (55 fired early), 2.25 lanes 160 (88), 0.9 m 123 (86) and 1.35 m 162 (87): the edges sit near 2 lanes and between 0.9 and 1.35 m.
 
 ### Overlapping {#overlapping}
 
@@ -1207,6 +1280,8 @@ The "Restraint" skill (ID=202161) reduces the chance by flat 3%. i.e. 19% to 16%
 
 If a uma were to enter the rushed state, she would do so in a random [section](#section) between 2 to 9\. She will enter the rushed state as soon as she enters the section.
 
+> Capture finding (patch 0034; [capture findings](capture-findings.md#rushed-spells-begin-in-sections-2-to-9)): sections 2 to 9 counted from 1, as written. On the 117 tournament recordings each of the 143 rushed spells begins at the start of a section from 2 to 9 (15, 17, 19, 14, 19, 21, 18 and 20 spells; chi-square 2.29 on 7 degrees of freedom against uniform), none in 1 or 10: the last clear frame and the first rushed frame bracket that start in 136 cases, and in the other 7 the last clear frame lies less than one tick of her own movement past it. Upstream's 53 Hanshin captures agree: 61 spells, 13, 6, 7, 3, 7, 10, 7 and 8, none in 1 or 10. The first rushed frame is 3.0 / 11.8 / 21.6 / 24.7 m (p5/50/95/max) into its section, on sections 50 to 133 m long, so the spell begins at the section's start. It shows on the tick after the crossing. The engine drew sections 3 to 10 until patch 0034.
+
 While rushed, HP consumption is increased to 1.6x. Rushed also forces the uma to change their position keeping strategy and succeed in all position keep Wit rolls. Worth noting that this change in position keeping strategy only affects the AI, and does not affect things like strategy coefficient when calculating base target speed.
 
 - Front Runners will enter speed up mode.
@@ -1263,6 +1338,8 @@ TargetSpeed+=(200\*GutsStat)0.708\*0.0001\[m/s\]
 Accel+=(160\*GutsStat)0.59\*0.0001\[m/s\]
 
 Competition cannot occur when HP is less than 15%, and will end if HP is reduced to below 5%.
+
+> Capture finding (patches 0033 and 0037; [capture findings](capture-findings.md#the-duel-window-is-timed-per-target)): the 2 seconds are timed per (uma, target) pair: the pair's window opens on the first tick the target is in the box and closes on the tick it leaves, and a duel can start on a target whose window has run for more than 2 s. A pair counts its window in whole ticks: more than 2 s is more than 30 ticks of 0.0666 s (30 ticks are 1.998 s, 31 are 2.0646 s). The rule evaluated on the 117 tournament recordings, over 1404 runners and 533 recorded duels, scores 528 true and 17 false positives, 5 false negatives and 854 true negatives with a window per target, against 530 / 34 / 3 / 837 with one window across partners; recorded minus predicted start, p5/50/95, is -0.11/0.11/0.19 s against -0.04/0.13/0.83 s. A single sticky target, a reset whenever the partner set changes, a longer window and a smaller box all fit worse. Until patch 0033 the engine kept one window per uma, running while any uma was in the box.
 
 > Real-data amendments ([hakuraku.moe/notes/dueling](https://hakuraku.moe/notes/dueling)):
 >
@@ -1492,6 +1569,10 @@ The race time displayed on the scoreboard is different from the actual race time
 DisplayedTime=ActualTime\*1.18
 
 There is a lower bound to each race’s display time. For example, 2400m Tokyo turf races have a lower bound of 2m21s6. Should a uma break the lower bound, the displayed time will be the lower bound plus up to 1 second. There is an upper bound too.
+
+> Capture finding (patch 0038; [capture findings](capture-findings.md#finish-time-and-same-tick-order-fixed)): the actual time is when the uma crossed the line, inside the tick that carried her over it. On the 117 tournament recordings `finishTimeRaw` is never a value of the race clock (0 of 1,404 runners). For the 1,400 with per-tick frames either side of the line it is, bit for bit, t(n) − (p(n) − D) / (p(n) − p(n−1)) × 0.0666 in float32, where t(n) is the clock on that tick, p(n−1) and p(n) her distance on the frames either side and D the course distance. The same line anchored on the tick before, t(n−1) + (D − p(n−1)) / (p(n) − p(n−1)) × 0.0666, gives the recorded value for 912 of the 1,400. The finishing order is the order of these times in every race, and no two umas share one. Of the 222 groups of umas who crossed on one tick, 132 crossed in an order other than their gate order; in 21 races the winner crossed on the same tick as another uma, and in 14 of those an uma with a lower gate number crossed on it too. The displayed time keeps the 1.18 for gaps: each uma's displayed gap to the winner is 1.18 times her actual gap (117 of 117 races, to 1.5e-5 s), while the displayed times carry an offset of the race's own (1.51 to 10.12 s over the recordings), so `finishTime` / `finishTimeRaw` runs from 1.199 to 1.301. Whether the bounds above set that offset is not determined; the engine writes none.
+>
+> The engine computes the finish time this way (`crossing_time`, float32) and places umas who cross on one tick by it; equal times, which the recordings never show, keep runner order. Until patch 0038 a finisher's time was the clock of her crossing tick and umas who crossed on one tick were placed in runner order.
 
 # Race Courses {#race-courses}
 
