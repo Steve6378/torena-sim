@@ -689,6 +689,24 @@ pub fn assign_gates(fixed: &[Option<i64>], gate_count: usize, rng: &mut dyn Prng
         .collect()
 }
 
+/// Put the runners who crossed the line on one tick, given as `(id, finish
+/// time)` in runner-list order, into the order they crossed it: earliest
+/// finish time ([`crossing_time`](crate::runner::physics::crossing_time))
+/// first.
+///
+/// The game places by finish time. On the 117 tournament recordings
+/// `finishOrder` sorts by `finishTimeRaw` in every race, with no two runners
+/// on one time. Two or more runners cross on one tick in 222 groups, and 132
+/// of them crossed in an order other than their runner indices; in 21 races
+/// the winner shares her tick, and in 14 of those the lowest index among them
+/// is not the winner.
+///
+/// Equal times keep runner-list order (the sort is stable). The recordings
+/// hold no tie, so the game's rule for one is not determined.
+pub fn order_by_finish_time(finishers: &mut [(RunnerId, f64)]) {
+    finishers.sort_by(|a, b| a.1.total_cmp(&b.1));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

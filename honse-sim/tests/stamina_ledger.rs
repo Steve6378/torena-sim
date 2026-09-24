@@ -424,16 +424,19 @@ fn recovery_books_the_clamped_delta_and_a_drain_is_not_negative_recovery() {
 }
 
 /// Captured from the engine **before** the ledger existed, by running this same
-/// race on a tree with `honse-sim/src` stashed, and re-captured when the tick
-/// became the game's 0.0666 s (finish times are now float32 clock values).
+/// race on a tree with `honse-sim/src` stashed, re-captured when the tick
+/// became the game's 0.0666 s, and again when the finish time became the
+/// crossing inside the tick (float32, as the game records it).
 /// Bit-exact: if attribution ever perturbs the simulation, these move and this
 /// test fails. On the 1/15 s tick they were Front 96.73333333333296 s /
 /// 11.863822887639163 HP, Late 97.13333333333294 / -72.39326872221477, Pace
-/// 96.99999999999962 / -56.773337795749455.
+/// 96.99999999999962 / -56.773337795749455. With the finish time on the
+/// crossing tick's clock: Front 96.7022705078125 s, Late 97.16844940185547,
+/// Pace 96.96865844726563, the HP as below.
 const GOLDEN: [(&str, f64, f64); 3] = [
-    ("Front", 9.670_227_050_781_25e1, 1.385_918_908_121_463e1),
-    ("Late", 9.716_844_940_185_547e1, -7.357_851_146_430_278e1),
-    ("Pace", 9.696_865_844_726_563e1, -5.543_192_037_971_516_6e1),
+    ("Front", 9.669_616_699_218_75e1, 1.385_918_908_121_463e1),
+    ("Late", 9.712_977_600_097_656e1, -7.357_851_146_430_278e1),
+    ("Pace", 9.695_306_396_484_375e1, -5.543_192_037_971_516_6e1),
 ];
 const GOLDEN_ORDER: [&str; 3] = ["Front", "Pace", "Late"];
 

@@ -1836,6 +1836,9 @@ pub struct WasmCompareRoundData {
     pub finished: bool,
     /// Final position.
     pub finish_position: f64,
+    /// Finish time in seconds, the crossing inside the final tick (the last
+    /// `time` sample is that tick's clock).
+    pub finish_time: f64,
 }
 
 impl From<&CompareRoundData> for WasmCompareRoundData {
@@ -1867,6 +1870,7 @@ impl From<&CompareRoundData> for WasmCompareRoundData {
             used_skills: d.used_skills.clone(),
             finished: d.finished,
             finish_position: d.finish_position,
+            finish_time: d.finish_time,
         }
     }
 }

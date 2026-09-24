@@ -16,8 +16,8 @@ use uma_sim_primitives::course::model::CourseData;
 use uma_sim_primitives::events::{RaceObservation, RaceObserver, RaceObservers};
 use uma_sim_primitives::position_keep::{update_position_keep_coefficient, PositionKeepContext};
 use uma_sim_primitives::race_support::{
-    assign_gates, build_field_snapshot, build_field_view, condition_value, resolve_debuff_targets,
-    FieldOrderTracker,
+    assign_gates, build_field_snapshot, build_field_view, condition_value, order_by_finish_time,
+    resolve_debuff_targets, FieldOrderTracker,
 };
 use uma_sim_primitives::runner::lifecycle::{CreateRunner, PrepareContext};
 use uma_sim_primitives::runner::mechanics::DuelingRates;
@@ -124,7 +124,8 @@ pub struct Race {
 
     /// The field, indexed by `RunnerId`.
     runners: Vec<Runner>,
-    /// Ids of finished runners, in finish order (append-only).
+    /// Ids of finished runners, in finish order (append-only; runners who
+    /// cross on one tick by finish time).
     finished_runners: Vec<RunnerId>,
 
     /// The static condition catalog (owns the parser's backing data).
@@ -134,7 +135,8 @@ pub struct Race {
     /// Round index (selects which sampled trigger fires).
     round_iteration: usize,
     /// The race clock: 0 at the gate, one float32 tick a step, as the
-    /// game's (finish times, replay frames and events, telemetry).
+    /// game's (replay frames and events, telemetry). A finish time is read
+    /// back from it to the crossing inside the tick.
     clock: RaceClock,
     /// Master seed of the current round.
     seed: u64,
@@ -503,17 +505,20 @@ impl Race {
 
     fn emit_runner_ticks_and_finishes(&mut self, dt: f64) {
         let mut observers = std::mem::take(&mut self.observers);
-        let mut newly_finished: Vec<RunnerId> = Vec::new();
+        let mut newly_finished: Vec<(RunnerId, f64)> = Vec::new();
         for runner in &self.runners {
             if self.finished_runners.contains(&runner.id) {
                 continue;
             }
             observers.emit_after_runner_tick(self, runner, dt);
             if runner.finished {
-                newly_finished.push(runner.id);
+                newly_finished.push((runner.id, runner.finish_time));
             }
         }
-        for id in newly_finished {
+        // Runners who crossed on this tick are placed in the order they
+        // crossed it, not in runner-list order.
+        order_by_finish_time(&mut newly_finished);
+        for (id, _) in newly_finished {
             self.finished_runners.push(id);
             if let Some(runner) = self.runners.iter().find(|r| r.id == id) {
                 observers.emit_runner_finished(self, runner);
@@ -691,6 +696,28 @@ mod tests {
             .find(|r| r.id == first)
             .expect("winner present");
         assert!(winner.finish_time > 0.0);
+    }
+
+    #[test]
+    fn runners_who_cross_on_one_tick_finish_in_the_order_they_crossed() {
+        let mut race = race_with(3);
+        race.prepare_round(7);
+        let line = race.course.distance;
+        // Runner 1 stands behind runner 0 (1.3 m short against 1.0 m) but
+        // runs faster (26 m/s against 18): the next tick carries both over
+        // the line, runner 1 first.
+        for (idx, runner) in race.runners.iter_mut().enumerate() {
+            runner.start_delay_accumulator = 0.0;
+            runner.start_dash = false;
+            runner.current_speed = [18.0, 26.0, 20.0][idx];
+            runner.position = line - [1.0, 1.3, 200.0][idx];
+        }
+        race.on_update(FRAME_DT);
+
+        let now = race.clock.seconds();
+        assert_eq!(race.finished_runners(), &[RunnerId(1), RunnerId(0)]);
+        let (first, second) = (race.runners[1].finish_time, race.runners[0].finish_time);
+        assert!(now - FRAME_DT < first && first < second && second < now);
     }
 
     #[test]

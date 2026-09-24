@@ -258,7 +258,9 @@ pub struct Runner {
     pub start_delay_accumulator: f64,
     /// Whether the runner has finished the round.
     pub finished: bool,
-    /// Finish time in seconds (`0` until finished).
+    /// Finish time in seconds (`0` until finished): when she crossed the
+    /// line, inside the tick that carried her over it, as the game records
+    /// it ([`physics::crossing_time`]).
     pub finish_time: f64,
 
     // --- lane ---

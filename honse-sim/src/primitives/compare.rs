@@ -40,6 +40,7 @@ pub struct CompareRoundData {
     /// Per-tick gap to the pacer.
     pub pacer_gap: Vec<f64>,
     /// Per-tick race order (1-based rank; 0 when the engine does not track it).
+    /// The sample of the tick she crossed the line is her finishing place.
     pub order: Vec<i64>,
     /// Self-cast skill-effect activation logs, keyed by skill id.
     pub skill_activations: HashMap<String, Vec<SkillEffectLog>>,
@@ -78,6 +79,10 @@ pub struct CompareRoundData {
     pub finished: bool,
     /// Final position.
     pub finish_position: f64,
+    /// Finish time in seconds: when she crossed the line, inside the tick
+    /// that carried her over it (`0` until finished). The last `time` sample
+    /// is that tick's clock.
+    pub finish_time: f64,
 }
 
 /// Accumulated compare data: one map per round (runner id -> round data).
@@ -116,6 +121,9 @@ struct CompareInner {
     primary: Option<u32>,
     states: Vec<(u32, CompareRunnerState)>,
     rounds: Vec<CompareRound>,
+    /// Runners who have finished this round, observed or not: the next
+    /// finisher's place is one more.
+    finished_count: i64,
 }
 
 impl CompareInner {
@@ -200,6 +208,7 @@ impl RaceObserver for CompareObserver {
         inner.seed = seed;
         inner.primary = None;
         inner.states.clear();
+        inner.finished_count = 0;
     }
 
     fn on_after_runner_tick(
@@ -332,11 +341,20 @@ impl RaceObserver for CompareObserver {
         let distance = race.course_distance();
         let position = runner.position().min(distance);
         let mut inner = self.inner.borrow_mut();
+        // The engines emit finishes in finish order (runners who cross on one
+        // tick by finish time), so her place is one more than the finishers
+        // before her. The order sampled on her last tick was read before
+        // anyone moved on it; her place replaces it.
+        inner.finished_count += 1;
+        let place = inner.finished_count;
         let id = runner.id().0;
         if !self.observes_runner(id) {
             return;
         }
         let state = inner.state_mut(id);
+        if let Some(last) = state.data.order.last_mut() {
+            *last = place;
+        }
         close_all(
             &mut state.open_effects,
             &mut state.data.skill_activations,
@@ -384,6 +402,7 @@ impl RaceObserver for CompareObserver {
         d.stamina_ledger = runner.stamina_ledger();
         d.finished = true;
         d.finish_position = position;
+        d.finish_time = runner.finish_time();
     }
 
     fn on_round_end(&mut self, race: &dyn RaceObservation) {

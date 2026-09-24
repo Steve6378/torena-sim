@@ -17,8 +17,9 @@ use uma_sim_primitives::events::{RaceObservation, RaceObserver, RaceObservers};
 use uma_sim_primitives::position_keep::{update_position_keep_coefficient, PositionKeepContext};
 use uma_sim_primitives::race_support::{
     assign_gates, build_field_snapshot, build_field_view, front_blocking_runner,
-    has_side_blocking_runner, is_overtaking_runner, proximity_snapshots, resolve_debuff_targets,
-    update_condition_timers, FieldOrderTracker, FieldSnapshot, OrderUpWindows,
+    has_side_blocking_runner, is_overtaking_runner, order_by_finish_time, proximity_snapshots,
+    resolve_debuff_targets, update_condition_timers, FieldOrderTracker, FieldSnapshot,
+    OrderUpWindows,
 };
 use uma_sim_primitives::runner::lifecycle::{CreateRunner, PrepareContext};
 use uma_sim_primitives::runner::physics::{
@@ -123,7 +124,8 @@ pub struct Race {
 
     /// The field, indexed by `RunnerId`.
     runners: Vec<Runner>,
-    /// Ids of finished runners, in finish order (append-only).
+    /// Ids of finished runners, in finish order (append-only; runners who
+    /// cross on one tick by finish time).
     finished_runners: Vec<RunnerId>,
     /// Each finished runner's (race clock, position, speed) on the tick she
     /// crossed the line, in finish order. See [`finished_leader_position`].
@@ -136,7 +138,8 @@ pub struct Race {
     /// Round index (selects which sampled trigger fires).
     round_iteration: usize,
     /// The race clock: 0 at the gate, one float32 tick a step, as the
-    /// game's (finish times, replay frames and events, telemetry).
+    /// game's (replay frames and events, telemetry). A finish time is read
+    /// back from it to the crossing inside the tick.
     clock: RaceClock,
     /// Master seed of the current round.
     seed: u64,
@@ -903,17 +906,20 @@ impl Race {
 
     fn emit_runner_ticks_and_finishes(&mut self, dt: f64) {
         let mut observers = std::mem::take(&mut self.observers);
-        let mut newly_finished: Vec<RunnerId> = Vec::new();
+        let mut newly_finished: Vec<(RunnerId, f64)> = Vec::new();
         for runner in &self.runners {
             if self.finished_runners.contains(&runner.id) {
                 continue;
             }
             observers.emit_after_runner_tick(self, runner, dt);
             if runner.finished {
-                newly_finished.push(runner.id);
+                newly_finished.push((runner.id, runner.finish_time));
             }
         }
-        for id in newly_finished {
+        // Runners who crossed on this tick are placed in the order they
+        // crossed it, not in runner-list order.
+        order_by_finish_time(&mut newly_finished);
+        for (id, _) in newly_finished {
             self.finished_runners.push(id);
             if let Some(runner) = self.runners.iter().find(|r| r.id == id) {
                 self.finish_marks.push((
@@ -1080,6 +1086,86 @@ mod tests {
             race.add_runner(props(&format!("R{i}"), s));
         }
         race
+    }
+
+    /// Runners 0 and 1 stand short of the line in lanes far apart: runner 0
+    /// 1.0 m short at 18 m/s, runner 1 behind her, 1.3 m short, at 26 m/s.
+    /// The next tick carries both over it, runner 1 first (about 0.75 of the
+    /// way into the tick against 0.83), although she was behind when it began.
+    /// Runner 2 is far behind.
+    fn two_cross_on_one_tick(race: &mut Race) {
+        let line = race.course.distance;
+        for (idx, runner) in race.runners.iter_mut().enumerate() {
+            runner.start_delay_accumulator = 0.0;
+            runner.start_dash = false;
+            runner.current_speed = [18.0, 26.0, 20.0][idx];
+            runner.current_lane = [1.0, 6.0, 3.5][idx];
+            runner.position = line - [1.0, 1.3, 200.0][idx];
+        }
+    }
+
+    #[test]
+    fn runners_who_cross_on_one_tick_finish_in_the_order_they_crossed() {
+        use crate::contested::collectors::{RaceEventLogCollector, RaceLogEventKind};
+        use crate::contested::replay::RaceReplayCollector;
+        use uma_sim_primitives::compare::CompareDataCollector;
+
+        let mut race = race_with(3);
+        let replay = RaceReplayCollector::new();
+        let compare = CompareDataCollector::new();
+        let log = RaceEventLogCollector::new();
+        race.subscribe(replay.handle());
+        race.subscribe(compare.handle());
+        race.subscribe(log.handle());
+        race.prepare_round(7);
+        two_cross_on_one_tick(&mut race);
+        race.on_update(FRAME_DT);
+
+        let now = race.clock.seconds();
+        let time_of = |race: &Race, id: u32| race.runners[id as usize].finish_time;
+        // Both crossed on this tick, runner 1 earlier inside it: she is
+        // placed first although she comes later in the runner list and was
+        // behind when the tick began.
+        assert_eq!(race.finished_runners(), &[RunnerId(1), RunnerId(0)]);
+        let (first, second) = (time_of(&race, 1), time_of(&race, 0));
+        assert!(now - FRAME_DT < first && first < second && second < now);
+
+        race.run();
+        let results = &replay.result()[0].results;
+        assert_eq!(results[1].finish_order, 0);
+        assert_eq!(results[0].finish_order, 1);
+        assert_eq!(results[2].finish_order, 2);
+        assert_eq!(f64::from(results[1].finish_time_raw), first);
+        assert_eq!(f64::from(results[0].finish_time_raw), second);
+        assert!(results[0].finish_diff_time > 0.0);
+
+        let round = &compare.result().rounds[0];
+        let runner = |id: u32| {
+            round
+                .runners
+                .iter()
+                .find(|r| r.runner_id == id)
+                .expect("observed")
+        };
+        assert_eq!(runner(1).order.last(), Some(&1));
+        assert_eq!(runner(0).order.last(), Some(&2));
+        assert_eq!(runner(2).order.last(), Some(&3));
+        assert_eq!(runner(1).finish_time, first);
+        assert_eq!(runner(0).finish_time, second);
+
+        let places: Vec<(RunnerId, Option<u32>)> = log.result()[0]
+            .iter()
+            .filter(|e| e.kind == RaceLogEventKind::Finished)
+            .map(|e| (e.runner_id, e.detail.as_ref().and_then(|d| d.finish_place)))
+            .collect();
+        assert_eq!(
+            places,
+            vec![
+                (RunnerId(1), Some(1)),
+                (RunnerId(0), Some(2)),
+                (RunnerId(2), Some(3))
+            ]
+        );
     }
 
     #[test]

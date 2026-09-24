@@ -144,7 +144,8 @@ pub trait RunnerObservation {
     fn finished(&self) -> bool {
         false
     }
-    /// Finish time in seconds (0 until finished).
+    /// Finish time in seconds (0 until finished): the crossing inside the
+    /// tick that carried the runner over the line.
     fn finish_time(&self) -> f64 {
         0.0
     }

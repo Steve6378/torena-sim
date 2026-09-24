@@ -121,7 +121,9 @@ impl FrontBlock {
 pub struct UpdateContext<'a> {
     /// Course base speed (`20 - (distance - 2000) / 1000`).
     pub base_speed: f64,
-    /// Elapsed race time in seconds (drives `finish_time`).
+    /// The race clock after this tick, t(n), in seconds; a runner who crosses
+    /// the line on it finishes a fraction of the tick earlier
+    /// ([`crossing_time`]).
     pub accumulated_time: f64,
     /// The course configuration.
     pub course: &'a CourseData,
@@ -259,6 +261,7 @@ impl Runner {
             dt_after_delay = self.start_delay_accumulator.abs();
             self.start_delay_accumulator = 0.0;
         }
+        let position_before = self.position;
         self.position += displacement * dt_after_delay;
 
         // ---- stamina ----
@@ -280,7 +283,13 @@ impl Runner {
         // ---- finish ----
         if !self.finished && self.position >= ctx.course.distance {
             self.finished = true;
-            self.finish_time = ctx.accumulated_time;
+            self.finish_time = crossing_time(
+                ctx.accumulated_time,
+                dt,
+                position_before,
+                self.position,
+                ctx.course.distance,
+            );
         }
     }
 
@@ -909,6 +918,35 @@ fn advance_targeted_skill_timers(
     }
 }
 
+/// When a runner crossed the line, inside the tick that carried her over it:
+/// `t(n) - (p(n) - D) / (p(n) - p(n-1)) × dt` in float32, where `now` is
+/// t(n), the race clock after the crossing tick, `before` and `after` are her
+/// positions p(n-1) and p(n) either side of it, `line` is the course distance
+/// D and `dt` the tick.
+///
+/// The game records the crossing, not the tick. On the 117 tournament
+/// recordings `finishTimeRaw` is never a value of the clock (0 of 1,404
+/// runners). For the 1,400 whose crossing lies between two per-tick frames it
+/// is this value bit for bit, computed in float32 from those frames' times and
+/// distances. The same line anchored on the previous tick, `t(n-1) + (D -
+/// p(n-1)) / (p(n) - p(n-1)) × dt`, is equal in exact arithmetic but gives
+/// the recorded value for 912 of the 1,400, because the float32 clock's step
+/// is not exactly `dt`. The `t(n)` form in float64 is off by up to 7.6e-6 s
+/// and rounds to the recorded float32 for all 1,400.
+///
+/// A step that did not move returns `now`; a runner at the line has always
+/// moved.
+pub fn crossing_time(now: f64, dt: f64, before: f64, after: f64, line: f64) -> f64 {
+    let (now, dt) = (now as f32, dt as f32);
+    let (before, after, line) = (before as f32, after as f32, line as f32);
+    let run = after - before;
+    if run > 0.0 {
+        f64::from(now - (after - line) / run * dt)
+    } else {
+        f64::from(now)
+    }
+}
+
 /// Map a 0..=3 index back to a [`Phase`] (values above 3 saturate at LastSpurt).
 fn index_to_phase(index: usize) -> Phase {
     match index {
@@ -1085,6 +1123,91 @@ mod tests {
         };
         assert_eq!(condition_value("blocked_side"), 1);
         assert_eq!(condition_value("overtake"), 0);
+    }
+
+    /// Recorded crossings: (t(n), p(n-1), p(n), course distance,
+    /// finishTimeRaw), the frames either side of the line and the result row,
+    /// as the recordings hold them (float32). For each, the same line anchored
+    /// on t(n-1) misses the recorded value in float32, and float64 misses it
+    /// before rounding.
+    const RECORDED_CROSSINGS: [(f32, f32, f32, f32, f32); 4] = [
+        // 10104-r0006 runner 0, tick 1433
+        (95.436_93, 1_999.237, 2_000.914_3, 2_000.0, 95.400_62),
+        // 10501-r0093 runner 1, tick 827
+        (55.078_644, 1_199.390_1, 1_201.125_9, 1_200.0, 55.035_446),
+        // 11006-r0026 runner 1, tick 1220
+        (81.251_77, 1_698.820_7, 1_700.467_2, 1_700.0, 81.232_87),
+        // 10811-r0066 runner 6, tick 2413
+        (160.705_72, 3_199.726, 3_201.315, 3_200.0, 160.650_6),
+    ];
+
+    #[test]
+    fn crossing_time_is_the_recorded_finish_time_bit_for_bit() {
+        let dt = crate::runner::FRAME_DT;
+        for (now, before, after, line, recorded) in RECORDED_CROSSINGS {
+            let at = crossing_time(
+                f64::from(now),
+                dt,
+                f64::from(before),
+                f64::from(after),
+                f64::from(line),
+            );
+            assert_eq!(
+                at.to_bits(),
+                f64::from(recorded).to_bits(),
+                "{at} vs {recorded}"
+            );
+            let step = crate::runner::TICK_SECONDS;
+            let previous = now - step;
+            let from_previous = previous + (line - before) / (after - before) * step;
+            assert_ne!(from_previous, recorded, "t(n-1) form");
+            let wide = f64::from(now)
+                - (f64::from(after) - f64::from(line)) / (f64::from(after) - f64::from(before))
+                    * dt;
+            assert_ne!(wide, f64::from(recorded), "unrounded f64");
+            assert_eq!(wide as f32, recorded, "f64 rounded to f32");
+        }
+        // A step that did not move keeps the tick's clock.
+        assert_eq!(crossing_time(10.0, dt, 5.0, 5.0, 5.0), 10.0);
+    }
+
+    #[test]
+    fn a_runner_finishes_inside_the_tick_that_carries_her_over_the_line() {
+        let (mut r, course) = prepared(Strategy::PaceChaser);
+        let field = FieldView::at_gate();
+        let fi = test_field_inputs(&field);
+        let dt = crate::runner::FRAME_DT;
+        let now = crate::shared_kernel::math::RaceClock::after_ticks(1433, dt).seconds();
+        let ctx = UpdateContext {
+            accumulated_time: now,
+            ..update_ctx(&course)
+        };
+        r.start_delay_accumulator = 0.0;
+        r.start_dash = false;
+        r.current_speed = 20.0;
+        r.position = course.distance - 0.25;
+        let before = r.position;
+        r.on_update(dt, &fi, &ctx);
+        assert!(r.finished);
+        let after = r.position;
+        assert!(
+            after - course.distance > 0.5,
+            "she ends the tick past the line"
+        );
+        let expected = crossing_time(now, dt, before, after, course.distance);
+        assert_eq!(r.finish_time, expected);
+        assert!(
+            r.finish_time > now - dt && r.finish_time < now,
+            "{}",
+            r.finish_time
+        );
+        // The line lies a quarter of a metre into a step of about 1.3 m, so
+        // she crosses under a fifth of the way into the tick.
+        let fraction = (r.finish_time - (now - dt)) / dt;
+        assert!(
+            (fraction - 0.25 / (after - before)).abs() < 1e-3,
+            "{fraction}"
+        );
     }
 
     #[test]
