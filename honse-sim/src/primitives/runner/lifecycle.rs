@@ -228,7 +228,12 @@ impl Runner {
             base_target_speed_per_phase: [0.0; 3],
             modifiers: SpeedModifiers::zeroed(),
             section_modifiers: Vec::new(),
-            accumulate_time: Timer::new(-1.0),
+            // 0 at the gate, where the port started it at -1 s and so opened
+            // every `accumulatetime>=N` a second late. On the 117 recordings
+            // none of the 2093 firings of the 24 skills that read it comes
+            // before N s of the race, and 13 of the 16 with 14 or more
+            // firings first fire on the first tick past it (5.06 s, 10.06 s).
+            accumulate_time: Timer::new(0.0),
             condition_timer: Timer::new(-1.0),
             phase: Phase::EarlyRace,
             next_phase_transition: 0.0,
@@ -374,7 +379,7 @@ impl Runner {
         self.adjusted_stats = self.pristine_adjusted_stats;
         self.first_position_in_late_race = false;
         self.finish_time = 0.0;
-        self.accumulate_time = Timer::new(-1.0);
+        self.accumulate_time = Timer::new(0.0);
         self.condition_timer = Timer::new(-1.0);
         self.conditions.clear();
         self.condition_values.clear();

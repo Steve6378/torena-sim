@@ -6,12 +6,10 @@
 
 use crate::skills::condition::dynamic::{
     bool_num, compare, order_rate_band_holds, order_rate_band_index, register_dynamic_condition,
-    DynamicCondition, RunnerView,
+    DynamicCondition, RunnerView, ORDER_CONTINUE_GRACE_SECONDS,
 };
 
 use crate::skills::condition::operator::CmpKind;
-
-const CONTINUE_GRACE_PERIOD_SECONDS: f64 = 5.0;
 
 fn order_rate_continue(
     runner: &dyn RunnerView,
@@ -38,7 +36,7 @@ fn order_rate_continue(
         }
         _ => true,
     };
-    let active = runner.accumulate_time() > CONTINUE_GRACE_PERIOD_SECONDS && within_rate && held;
+    let active = runner.accumulate_time() > ORDER_CONTINUE_GRACE_SECONDS && within_rate && held;
     compare(bool_num(active), arg as f64, cmp)
 }
 

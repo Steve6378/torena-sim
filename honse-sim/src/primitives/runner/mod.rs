@@ -222,7 +222,10 @@ pub struct Runner {
     pub section_modifiers: Vec<f64>,
 
     // --- timers / phase ---
-    /// Per-runner elapsed timer (drives downhill cadence).
+    /// The runner's race clock, 0 at the gate like the race's own (finish
+    /// times, replay frames). `accumulatetime`, the `*_continue` 5 s grace,
+    /// skill cooldowns and the downhill / Conserve Power frame cadence read
+    /// it; the telemetry's `time[]` reports it.
     pub accumulate_time: Timer,
     /// Approximate-condition cadence timer (ticks once per second).
     pub condition_timer: Timer,

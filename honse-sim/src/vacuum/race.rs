@@ -32,7 +32,7 @@ use uma_sim_primitives::shared_kernel::language::{strategy_matches, GroundCondit
 use uma_sim_primitives::shared_kernel::params::RaceParameters;
 use uma_sim_primitives::shared_kernel::region::{Region, RegionList};
 use uma_sim_primitives::shared_kernel::rng::{Prng, Xoshiro256StarStar};
-use uma_sim_primitives::skills::condition::catalog::build_catalog;
+use uma_sim_primitives::skills::condition::catalog::build_catalog_for;
 use uma_sim_primitives::skills::condition::dynamic::register_all_dynamic_conditions;
 use uma_sim_primitives::skills::condition::language::ConditionParser;
 use uma_sim_primitives::skills::condition::{ConditionCatalog, ConditionResolution};
@@ -41,6 +41,11 @@ use uma_sim_primitives::stamina::policy::{NoopStaminaPolicy, StaminaPolicy};
 
 /// Frame duration: one tick of the runner kernel's clock.
 const FRAME_DT: f64 = uma_sim_primitives::runner::FRAME_DT;
+
+/// How this engine resolves skill conditions: statically, with no live field
+/// (ADR-0005). Its catalog and its runners' skill setup both read it, so the
+/// tokens only a live field resolves keep their offline policy here.
+const CONDITION_RESOLUTION: ConditionResolution = ConditionResolution::Static;
 
 /// Toggles and tuning that configure a simulation run.
 #[derive(Debug, Clone)]
@@ -187,7 +192,7 @@ impl Race {
             dueling_rates,
             runners: Vec::new(),
             finished_runners: Vec::new(),
-            catalog: build_catalog(),
+            catalog: build_catalog_for(CONDITION_RESOLUTION),
             whole_course,
             round_iteration: 0,
             accumulated_time: 0.0,
@@ -306,7 +311,7 @@ impl Race {
                 base_speed,
                 // Synthetic engine: static approximate regions + the ×10
                 // position-keep window (ADR-0005, no paradigm branch).
-                condition_resolution: ConditionResolution::Static,
+                condition_resolution: CONDITION_RESOLUTION,
                 pos_keep_end_multiplier: 10.0,
                 race_params: &self.race_params,
                 whole_course: &self.whole_course,
@@ -705,6 +710,77 @@ mod tests {
         gates.sort_unstable();
         gates.dedup();
         assert_eq!(gates.len(), 9);
+    }
+
+    /// The vacuum engine has no live field to check a rival-dependent token
+    /// against, so the token falls back to a no-op there and keeps the
+    /// port's Erlang offset into its window: the triggers spread over the
+    /// Late-Race. The contested engine's first-tick policy would put every
+    /// sample on the window's first metre.
+    #[test]
+    fn rival_tokens_keep_their_spread_in_the_vacuum() {
+        use uma_sim_primitives::shared_kernel::ids::SkillId;
+        use uma_sim_primitives::skills::effect::{SkillRarity, SkillTarget};
+        use uma_sim_primitives::skills::model::{RawSkillEffect, Skill, SkillAlternative};
+        let window = 1600.0..=2400.0; // the Late-Race of the 2400 m course
+        for condition in [
+            "phase>=2&is_overtake==1",
+            "phase>=2&near_count>=1",
+            "phase>=2&is_move_lane==1",
+        ] {
+            let mut carrier = props("carrier", Strategy::PaceChaser);
+            carrier.skills = vec![Skill {
+                skill_id: SkillId::new("200001"),
+                rarity: SkillRarity::White,
+                tags: vec![],
+                alternatives: vec![SkillAlternative {
+                    base_duration: 30000.0,
+                    cooldown_time: None,
+                    duration_scaling: None,
+                    condition: condition.to_owned(),
+                    precondition: None,
+                    effects: vec![RawSkillEffect {
+                        modifier: 1500.0,
+                        target: SkillTarget::SelfTarget,
+                        effect_type: 27, // TargetSpeed
+                        value_usage: None,
+                        value_level_usage: None,
+                        pre_applied_multiplier: None,
+                        additional_activate_type: None,
+                    }],
+                }],
+            }];
+            let settings = SimulationSettings {
+                skill_samples: 20,
+                ..SimulationSettings::default()
+            };
+            let mut race = Race::new(
+                test_course(),
+                GroundCondition::Firm,
+                settings,
+                test_race_params(),
+                None,
+            );
+            race.add_runner(carrier);
+            // One draw of 20 samples; round k arms sample k.
+            let starts: Vec<f64> = (0..20)
+                .map(|_| {
+                    race.prepare_round(7);
+                    race.runners[0].pending_skills[0].trigger.start
+                })
+                .collect();
+            assert!(
+                starts.iter().all(|s| window.contains(s)),
+                "{condition}: {starts:?}"
+            );
+            let at_start = starts.iter().filter(|&&s| s == *window.start()).count();
+            let lo = starts.iter().copied().fold(f64::INFINITY, f64::min);
+            let hi = starts.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+            assert!(
+                at_start <= 1 && hi - lo >= 700.0,
+                "{condition}: {at_start} of 20 at the window start, {starts:?}"
+            );
+        }
     }
 
     #[test]

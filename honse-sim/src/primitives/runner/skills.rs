@@ -2793,6 +2793,99 @@ mod tests {
         assert!(r.pending_skills.is_empty());
     }
 
+    /// A rival-dependent token is checked from the first tick of every region
+    /// of its window: here `is_overtake` in the Early-Race or the Late-Race.
+    /// The port's Erlang policy armed one region, from a random offset in.
+    #[test]
+    fn a_rival_token_is_checked_from_the_first_tick_of_every_region() {
+        use crate::skills::condition::dynamic::ConditionTimers;
+        let skill = target_speed_skill(
+            "202401",
+            SkillRarity::Gold,
+            "phase==0&is_overtake==1@phase==2&is_overtake==1",
+        );
+        let regions = build(&skill)[0].regions.0.clone();
+        assert_eq!(regions.len(), 2, "{regions:?}");
+        let target = |held: bool| FieldView {
+            condition_timers: Some(ConditionTimers {
+                has_overtake_target: held,
+                ..ConditionTimers::default()
+            }),
+            ..FieldView::default()
+        };
+        let runner = || {
+            let mut r = runner_with_skills(vec![skill.clone()]);
+            prepare(&mut r);
+            r.wit_checks_enabled = false;
+            r
+        };
+
+        let r = runner();
+        assert_eq!(r.pending_skills[0].trigger, regions[0]);
+        assert_eq!(r.pending_skills[0].later_triggers, regions[1..].to_vec());
+
+        // First region: nothing while no target, then the first tick one is.
+        let mut r = runner();
+        r.position = regions[0].start + 0.5;
+        r.process_skill_activations(&target(false), 2400.0);
+        assert_eq!(r.skills_activated_count, 0);
+        r.position += 1.0;
+        r.process_skill_activations(&target(true), 2400.0);
+        assert_eq!(r.skills_activated_count, 1, "the first tick it holds");
+
+        // Second region, the first region passed without a target.
+        let mut r = runner();
+        r.position = regions[0].start + 0.5;
+        r.process_skill_activations(&target(false), 2400.0);
+        r.position = regions[1].start - 1.0; // past the first window
+        r.process_skill_activations(&target(false), 2400.0);
+        r.position = regions[1].start + 0.5;
+        r.process_skill_activations(&target(true), 2400.0);
+        assert_eq!(
+            r.skills_activated_count, 1,
+            "the second region's first tick"
+        );
+    }
+
+    /// `compete_fight_count>0` (Now We're Cruisin'!, 100341) is checked from
+    /// the first tick of its window, so it fires on the first tick of the
+    /// runner's own Showdown. On the 117 recordings all 15 firings of
+    /// 100341/900341 come one recorded tick (0.067 s) after her first duel
+    /// event. The port's Uniform policy first drew a random start point into
+    /// the window.
+    #[test]
+    fn a_showdown_skill_fires_on_the_first_tick_of_her_duel() {
+        use crate::shared_kernel::language::Strategy;
+        use crate::skills::condition::dynamic::ActiveRunner;
+        let skill = target_speed_skill("100341", SkillRarity::Unique, "compete_fight_count>0");
+        let regions = build(&skill)[0].regions.0.clone();
+        let field = |dueling: bool| FieldView {
+            active_runners: vec![ActiveRunner {
+                is_self: true,
+                position: 0.0,
+                strategy: Strategy::PaceChaser,
+                gate: 0,
+                popularity: 0,
+                is_rushed: false,
+                is_dueling: dueling,
+                has_dueled: false,
+                activated_advantage_effect_types: 0,
+            }],
+            ..FieldView::default()
+        };
+        let mut r = runner_with_skills(vec![skill]);
+        prepare(&mut r);
+        r.wit_checks_enabled = false;
+        assert_eq!(r.pending_skills[0].trigger, regions[0], "the whole window");
+
+        r.position = regions[0].start + 0.5;
+        r.process_skill_activations(&field(false), 2400.0);
+        assert_eq!(r.skills_activated_count, 0, "no duel yet");
+        r.position += 1.0;
+        r.process_skill_activations(&field(true), 2400.0);
+        assert_eq!(r.skills_activated_count, 1, "the duel's first tick");
+    }
+
     /// A skill of two alternatives, as the data carries them: the first
     /// applies 4500, the second 3500, both with `cooldown_time`.
     fn two_alternative_skill(

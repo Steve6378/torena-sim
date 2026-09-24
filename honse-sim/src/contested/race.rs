@@ -32,7 +32,7 @@ use uma_sim_primitives::shared_kernel::language::{strategy_matches, GroundCondit
 use uma_sim_primitives::shared_kernel::params::RaceParameters;
 use uma_sim_primitives::shared_kernel::region::{Region, RegionList};
 use uma_sim_primitives::shared_kernel::rng::{Prng, Xoshiro256StarStar};
-use uma_sim_primitives::skills::condition::catalog::build_catalog;
+use uma_sim_primitives::skills::condition::catalog::build_catalog_for;
 use uma_sim_primitives::skills::condition::dynamic::register_all_dynamic_conditions;
 use uma_sim_primitives::skills::condition::language::ConditionParser;
 use uma_sim_primitives::skills::condition::{ConditionCatalog, ConditionResolution};
@@ -41,6 +41,11 @@ use uma_sim_primitives::stamina::policy::{NoopStaminaPolicy, StaminaPolicy};
 
 /// Frame duration: one tick of the runner kernel's clock.
 const FRAME_DT: f64 = uma_sim_primitives::runner::FRAME_DT;
+
+/// How this engine resolves skill conditions: against the live field
+/// (ADR-0005). Its catalog and its runners' skill setup both read it, so the
+/// tokens only a live field resolves are checked from their first tick.
+const CONDITION_RESOLUTION: ConditionResolution = ConditionResolution::Dynamic;
 
 /// Toggles and tuning that configure a simulation run.
 #[derive(Debug, Clone)]
@@ -204,7 +209,7 @@ impl Race {
             runners: Vec::new(),
             finished_runners: Vec::new(),
             finish_marks: Vec::new(),
-            catalog: build_catalog(),
+            catalog: build_catalog_for(CONDITION_RESOLUTION),
             whole_course,
             round_iteration: 0,
             accumulated_time: 0.0,
@@ -334,7 +339,7 @@ impl Race {
                 // position-keep window (mechanics § Position Keeping: sections
                 // 1–10). ADR-0005 previously inherited ×3 from the retired TS
                 // reference; both engines now match canon.
-                condition_resolution: ConditionResolution::Dynamic,
+                condition_resolution: CONDITION_RESOLUTION,
                 pos_keep_end_multiplier: 10.0,
                 race_params: &self.race_params,
                 whole_course: &self.whole_course,
@@ -1141,6 +1146,68 @@ mod tests {
             .find(|r| r.id == first)
             .expect("winner present");
         assert!(winner.finish_time > 0.0);
+    }
+
+    /// Every runner's clock is the race's: 0 at the gate, the clock the
+    /// finish times and the replay frames are on. The port started the
+    /// runners' at -1 s.
+    #[test]
+    fn every_runner_reads_the_race_clock() {
+        let mut race = race_with(3);
+        race.prepare_round(7);
+        for _ in 0..200 {
+            race.on_update(FRAME_DT);
+            for r in &race.runners {
+                let (runner, race) = (r.accumulate_time.t, race.accumulated_time);
+                assert!((runner - race).abs() < 1e-9, "runner {runner}, race {race}");
+            }
+        }
+    }
+
+    /// `accumulatetime>=5` opens on the first tick at or after 5 s of the
+    /// race, as on the recordings (5.06 s, the first game tick past 5 s).
+    #[test]
+    fn accumulatetime_opens_at_its_second_of_the_race() {
+        use uma_sim_primitives::shared_kernel::ids::SkillId;
+        use uma_sim_primitives::skills::effect::{SkillRarity, SkillTarget};
+        use uma_sim_primitives::skills::model::{RawSkillEffect, Skill, SkillAlternative};
+        let mut carrier = props("carrier", Strategy::PaceChaser);
+        carrier.skills = vec![Skill {
+            skill_id: SkillId::new("100011"),
+            rarity: SkillRarity::Unique, // no wit roll
+            tags: vec![],
+            alternatives: vec![SkillAlternative {
+                base_duration: 30000.0,
+                cooldown_time: None,
+                duration_scaling: None,
+                condition: "accumulatetime>=5".to_owned(),
+                precondition: None,
+                effects: vec![RawSkillEffect {
+                    modifier: 1500.0,
+                    target: SkillTarget::SelfTarget,
+                    effect_type: 27, // TargetSpeed
+                    value_usage: None,
+                    value_level_usage: None,
+                    pre_applied_multiplier: None,
+                    additional_activate_type: None,
+                }],
+            }],
+        }];
+        let mut race = Race::new(
+            test_course(),
+            GroundCondition::Firm,
+            SimulationSettings::default(),
+            test_race_params(),
+        );
+        race.add_runner(carrier);
+        race.add_runner(props("rival", Strategy::LateSurger));
+        race.prepare_round(7);
+        while race.runners[0].skills_activated_count == 0 {
+            assert!(race.accumulated_time < 10.0, "never fired");
+            race.on_update(FRAME_DT);
+        }
+        let t = race.accumulated_time;
+        assert!((5.0 - 1e-9..5.0 + FRAME_DT).contains(&t), "fired at {t} s");
     }
 
     #[test]

@@ -146,6 +146,12 @@ pub fn order_rate_band_holds(order: i64, threshold: i64, is_in_rate: bool) -> bo
     }
 }
 
+/// Seconds of the race clock the `order_rate_{in,out}NN_continue` bands
+/// ignore (mechanics § order_rate: "The first 5 seconds in the race do not
+/// count"). The band latch (`update_condition_timers`) and the one-tick
+/// fallback without a live field both read it.
+pub const ORDER_CONTINUE_GRACE_SECONDS: f64 = 5.0;
+
 /// Live state of an active (non-finished) runner, used by the state conditions
 /// (temptation / dueling counts). Includes the observing runner itself, flagged
 /// via [`is_self`](ActiveRunner::is_self) so `includeSelf=false` predicates can

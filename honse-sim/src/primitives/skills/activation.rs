@@ -20,6 +20,18 @@ use crate::shared_kernel::rng::Prng;
 pub enum ActivationSamplePolicy {
     /// Fire at the start of the first region (no randomness).
     Immediate,
+    /// Arm every region, in position order, and fire on the first tick the
+    /// live condition holds in any of them (no randomness). The contested
+    /// engine's policy for 23 of the catalog's 53 `dynamic_or_static` tokens,
+    /// the ones whose timing only the live field decides (`near_count`,
+    /// `is_overtake`, `is_move_lane`, `compete_fight_count`, ...): the game
+    /// checks them every frame, where the port guessed at their timing with
+    /// an [`Erlang`](Self::Erlang) offset ([`Uniform`](Self::Uniform) for
+    /// `compete_fight_count`). The other 30 keep
+    /// [`Immediate`](Self::Immediate) or [`Random`](Self::Random). The
+    /// vacuum engine has no live field to check, so it keeps the port's
+    /// policies.
+    FirstTick,
     /// Length-weighted random point across all regions.
     Random,
     /// Behaves exactly like [`Random`](Self::Random) but is distinguishable at
@@ -30,7 +42,9 @@ pub enum ActivationSamplePolicy {
     StraightRandom,
     /// Place up to four triggers across the corners and keep the earliest.
     AllCornerRandom,
-    /// Erlang-distributed offset (shape `k`, rate `lambda`).
+    /// Erlang-distributed offset (shape `k`, rate `lambda`). The vacuum
+    /// engine's policy for 22 of the 23 tokens the contested engine checks
+    /// from their first tick ([`FirstTick`](Self::FirstTick)).
     Erlang { k: u32, lambda: f64 },
     /// Log-normal-distributed offset (`mu`, `sigma`) via Box–Muller.
     LogNormal { mu: f64, sigma: f64 },
@@ -63,6 +77,7 @@ impl std::error::Error for ReconcileError {}
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Category {
     Immediate,
+    FirstTick,
     Distribution,
     Random,
     Straight,
@@ -74,6 +89,7 @@ impl ActivationSamplePolicy {
     fn category(&self) -> Category {
         match self {
             ActivationSamplePolicy::Immediate => Category::Immediate,
+            ActivationSamplePolicy::FirstTick => Category::FirstTick,
             ActivationSamplePolicy::Erlang { .. }
             | ActivationSamplePolicy::LogNormal { .. }
             | ActivationSamplePolicy::Uniform => Category::Distribution,
@@ -91,11 +107,14 @@ impl ActivationSamplePolicy {
     ///
     /// - `Fixed` dominates everything.
     /// - `Immediate` loses to everything.
+    /// - `FirstTick` beats only `Immediate`: a live token AND-ed with a
+    ///   static one still arms every region, and a placed random point stays
+    ///   placed.
     /// - distribution policies lose to `Random`/`Straight`/`AllCorner`.
     /// - `Random`/`CornerRandom` lose to `Straight`/`AllCorner`.
     /// - `Straight` vs `AllCorner` is an error (mutually exclusive).
     pub fn reconcile(self, other: Self) -> Result<Self, ReconcileError> {
-        use Category::{AllCorner, Distribution, Immediate, Random, Straight};
+        use Category::{AllCorner, Distribution, FirstTick, Immediate, Random, Straight};
 
         if self.category() == Category::Fixed {
             return Ok(self);
@@ -103,8 +122,12 @@ impl ActivationSamplePolicy {
         match other.category() {
             Category::Fixed => Ok(other),
             Immediate => Ok(self),
+            FirstTick => match self.category() {
+                Immediate => Ok(other),
+                _ => Ok(self),
+            },
             Random | Distribution => match self.category() {
-                Immediate | Distribution => Ok(other),
+                Immediate | FirstTick | Distribution => Ok(other),
                 _ => Ok(self),
             },
             Straight => match self.category() {
@@ -124,6 +147,9 @@ impl ActivationSamplePolicy {
     pub fn sample(&self, regions: &RegionList, nsamples: usize, rng: &mut dyn Prng) -> Vec<Region> {
         match self {
             ActivationSamplePolicy::Immediate => regions.0.iter().take(1).copied().collect(),
+            ActivationSamplePolicy::FirstTick => {
+                Self::armed_windows(regions).into_iter().take(1).collect()
+            }
             ActivationSamplePolicy::Random | ActivationSamplePolicy::CornerRandom => {
                 Self::sample_weighted(regions, nsamples, rng)
             }
@@ -143,8 +169,8 @@ impl ActivationSamplePolicy {
     /// Like [`Self::sample`], but each sample is the full, position-ordered list
     /// of trigger windows it places: all of them for `AllCornerRandom` (mechanics
     /// doc § all_corner_random: up to 4 triggers, "the condition is fulfilled if
-    /// uma is within one of the triggers"), one for every other policy. Draws
-    /// exactly the RNG `sample` draws.
+    /// uma is within one of the triggers") and for `FirstTick` (every region),
+    /// one for every other policy. Draws exactly the RNG `sample` draws.
     pub fn sample_sets(
         &self,
         regions: &RegionList,
@@ -152,6 +178,14 @@ impl ActivationSamplePolicy {
         rng: &mut dyn Prng,
     ) -> Vec<Vec<Region>> {
         match self {
+            ActivationSamplePolicy::FirstTick => {
+                let windows = Self::armed_windows(regions);
+                if windows.is_empty() {
+                    Vec::new()
+                } else {
+                    vec![windows]
+                }
+            }
             ActivationSamplePolicy::AllCornerRandom => (0..nsamples)
                 .map(|_| {
                     let placed = Self::place_all_triggers(regions, rng);
@@ -168,6 +202,23 @@ impl ActivationSamplePolicy {
                 .map(|r| vec![r])
                 .collect(),
         }
+    }
+
+    /// The windows `FirstTick` arms: every region in position order, touching
+    /// or overlapping ones joined. A pending skill moves on to its next
+    /// window on the tick after it passes the current one's end, so two
+    /// windows that touch would lose that tick.
+    fn armed_windows(regions: &RegionList) -> Vec<Region> {
+        let mut sorted = regions.0.clone();
+        sorted.sort_by(|a, b| a.start.total_cmp(&b.start));
+        let mut windows: Vec<Region> = Vec::with_capacity(sorted.len());
+        for region in sorted {
+            match windows.last_mut() {
+                Some(last) if region.start <= last.end => last.end = last.end.max(region.end),
+                _ => windows.push(region),
+            }
+        }
+        windows
     }
 
     /// Length-weighted point sampling (`RandomPolicy` / `CornerRandomPolicy`).
@@ -489,6 +540,33 @@ mod tests {
             P::AllCornerRandom.reconcile(P::StraightRandom),
             Err(ReconcileError::StraightVsAllCorner)
         );
+    }
+
+    #[test]
+    fn first_tick_arms_every_region_in_order_and_draws_nothing() {
+        let r = regions(&[(800.0, 1200.0), (0.0, 100.0), (100.0, 300.0)]);
+        let mut a = Xoshiro256StarStar::from_u64_seed(5);
+        let mut b = Xoshiro256StarStar::from_u64_seed(5);
+        let policy = ActivationSamplePolicy::FirstTick;
+        // Touching windows join: the skill must not lose the tick between.
+        assert_eq!(
+            policy.sample_sets(&r, 4, &mut a),
+            vec![vec![Region::new(0.0, 300.0), Region::new(800.0, 1200.0)]]
+        );
+        assert_eq!(policy.sample(&r, 4, &mut a), vec![Region::new(0.0, 300.0)]);
+        assert!(policy.sample_sets(&RegionList::new(), 1, &mut a).is_empty());
+        assert_eq!(a.uniform(1_000_000), b.uniform(1_000_000), "no RNG drawn");
+    }
+
+    #[test]
+    fn first_tick_beats_only_immediate() {
+        use ActivationSamplePolicy as P;
+        assert_eq!(P::Immediate.reconcile(P::FirstTick), Ok(P::FirstTick));
+        assert_eq!(P::FirstTick.reconcile(P::Immediate), Ok(P::FirstTick));
+        for placed in [P::Random, P::Uniform, P::StraightRandom, P::AllCornerRandom] {
+            assert_eq!(P::FirstTick.reconcile(placed), Ok(placed));
+            assert_eq!(placed.reconcile(P::FirstTick), Ok(placed));
+        }
     }
 
     #[test]

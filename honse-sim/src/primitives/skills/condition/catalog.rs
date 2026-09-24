@@ -503,10 +503,43 @@ fn noop_immediate() -> Arc<dyn Condition> {
     immediate().noop_all().build()
 }
 
-fn noop_erlang(k: u32, lambda: f64) -> Arc<dyn Condition> {
-    Cond::new(ActivationSamplePolicy::Erlang { k, lambda })
-        .noop_all()
-        .build()
+/// A token only the live race resolves (`near_count`, `is_overtake`,
+/// `blocked_side_continuetime`, `is_move_lane`, `compete_fight_count`, ...).
+/// Its policy depends on who resolves it:
+///
+/// - `Dynamic` (the contested engine): the live predicate decides, from the
+///   first tick of every region ([`ActivationSamplePolicy::FirstTick`]). The
+///   recordings fire on the first tick the condition holds: 252 of Uma
+///   Stan's 424 activations (201591, `near_count>=3&accumulatetime>=5`) fall
+///   on 5.06 s, the first tick its clock allows, and their median is 89 m,
+///   where the port's offset put the engine's at 282 m.
+/// - `Static` (the vacuum engine): `offline`, the port's policy. There is no
+///   live field to check, so the token falls back to its static filter, a
+///   no-op for most, and `FirstTick` would fire every sample on the first
+///   metre of the window; the offline policy stands in for when the live
+///   condition would come up. For most tokens it is an Erlang offset into
+///   the window (k 3, rate 2; 1 and 2 for `is_overtake`, 5 and 1 for
+///   `is_move_lane`). The offset is a share of the window's summed length,
+///   not of the course: with one sample a round its median is 7.4% of that
+///   length at k 3, rate 2 (148 m of a 2000 m window), 1.9% for
+///   `is_overtake` and 26% for `is_move_lane`.
+fn live_token(resolution: ConditionResolution, offline: ActivationSamplePolicy) -> Cond {
+    Cond::new(match resolution {
+        ConditionResolution::Dynamic => ActivationSamplePolicy::FirstTick,
+        ConditionResolution::Static => offline,
+    })
+}
+
+/// An Erlang offset (shape `k`, rate `lambda`), the offline policy of most
+/// [`live_token`]s.
+fn erlang(k: u32, lambda: f64) -> ActivationSamplePolicy {
+    ActivationSamplePolicy::Erlang { k, lambda }
+}
+
+/// A [`live_token`] with no static filter of its own, an Erlang offset
+/// (shape `k`, rate `lambda`) offline.
+fn noop_live_token(resolution: ConditionResolution, k: u32, lambda: f64) -> Arc<dyn Condition> {
+    live_token(resolution, erlang(k, lambda)).noop_all().build()
 }
 
 /// `noop_section_random`: random-policy condition clipping to a 1/24-distance
@@ -654,8 +687,18 @@ fn intersect_each(regions: &RegionList, bounds: &[Region]) -> RegionList {
 // The catalog
 // ============================================================
 
-/// Build the full static condition catalog.
+/// Build the full static condition catalog for the contested engine
+/// ([`build_catalog_for`] under [`ConditionResolution::Dynamic`]).
 pub fn build_catalog() -> ConditionCatalog {
+    build_catalog_for(ConditionResolution::Dynamic)
+}
+
+/// Build the full static condition catalog for an engine that sets its skills
+/// up under `resolution`. The two catalogs hold the same tokens and filters;
+/// only the sample policy of the tokens a live field resolves differs (see
+/// `live_token`), so the catalog must be built for the resolution the
+/// skills are then applied under.
+pub fn build_catalog_for(resolution: ConditionResolution) -> ConditionCatalog {
     // Populate the dynamic-condition registry so `dynamic_or_static` conditions
     // resolve to live full-sim predicates under `Dynamic` resolution. Idempotent.
     register_all_dynamic_conditions();
@@ -802,32 +845,38 @@ pub fn build_catalog() -> ConditionCatalog {
     // --- multi-runner delegating (dynamic registry; static fallbacks) ---
     add(
         "bashin_diff_behind",
-        dynamic_or_static(noop_erlang(3, 2.0), "bashin_diff_behind"),
+        dynamic_or_static(noop_live_token(resolution, 3, 2.0), "bashin_diff_behind"),
     );
     add(
         "bashin_diff_infront",
-        dynamic_or_static(noop_erlang(3, 2.0), "bashin_diff_infront"),
+        dynamic_or_static(noop_live_token(resolution, 3, 2.0), "bashin_diff_infront"),
     );
     add(
         "behind_near_lane_time",
-        dynamic_or_static(noop_erlang(3, 2.0), "behind_near_lane_time"),
+        dynamic_or_static(noop_live_token(resolution, 3, 2.0), "behind_near_lane_time"),
     );
     add(
         "behind_near_lane_time_set1",
-        dynamic_or_static(noop_erlang(3, 2.0), "behind_near_lane_time_set1"),
+        dynamic_or_static(
+            noop_live_token(resolution, 3, 2.0),
+            "behind_near_lane_time_set1",
+        ),
     );
     add(
         "blocked_all_continuetime",
-        dynamic_or_static(noop_erlang(3, 2.0), "blocked_all_continuetime"),
+        dynamic_or_static(
+            noop_live_token(resolution, 3, 2.0),
+            "blocked_all_continuetime",
+        ),
     );
     add(
         "blocked_front",
-        dynamic_or_static(noop_erlang(3, 2.0), "blocked_front"),
+        dynamic_or_static(noop_live_token(resolution, 3, 2.0), "blocked_front"),
     );
     add(
         "blocked_front_continuetime",
         dynamic_or_static(
-            Cond::new(ActivationSamplePolicy::Erlang { k: 3, lambda: 2.0 })
+            live_token(resolution, erlang(3, 2.0))
                 .gte_gt(|p| pass(shift_regions_forward_by_min_time(p)))
                 .build(),
             "blocked_front_continuetime",
@@ -835,12 +884,12 @@ pub fn build_catalog() -> ConditionCatalog {
     );
     add(
         "blocked_side",
-        dynamic_or_static(noop_erlang(3, 2.0), "blocked_side"),
+        dynamic_or_static(noop_live_token(resolution, 3, 2.0), "blocked_side"),
     );
     add(
         "blocked_side_continuetime",
         dynamic_or_static(
-            Cond::new(ActivationSamplePolicy::Erlang { k: 3, lambda: 2.0 })
+            live_token(resolution, erlang(3, 2.0))
                 .gte_gt(|p| pass(shift_regions_forward_by_min_time(p)))
                 .build(),
             "blocked_side_continuetime",
@@ -848,12 +897,12 @@ pub fn build_catalog() -> ConditionCatalog {
     );
     add(
         "change_order_onetime",
-        dynamic_or_static(noop_erlang(3, 2.0), "change_order_onetime"),
+        dynamic_or_static(noop_live_token(resolution, 3, 2.0), "change_order_onetime"),
     );
     add(
         "change_order_up_end_after",
         dynamic_or_static(
-            Cond::new(ActivationSamplePolicy::Erlang { k: 3, lambda: 2.0 })
+            live_token(resolution, erlang(3, 2.0))
                 .gte_gt(|p| {
                     let bounds = Region::new(
                         phase_start(p.course.distance, Phase::LateRace),
@@ -868,7 +917,7 @@ pub fn build_catalog() -> ConditionCatalog {
     add(
         "change_order_up_finalcorner_after",
         dynamic_or_static(
-            Cond::new(ActivationSamplePolicy::Erlang { k: 3, lambda: 2.0 })
+            live_token(resolution, erlang(3, 2.0))
                 .gte_gt(|p| {
                     if !is_sorted_by_start(&p.course.corners) {
                         return Err(ConditionError::Invalid(
@@ -888,7 +937,7 @@ pub fn build_catalog() -> ConditionCatalog {
     add(
         "change_order_up_middle",
         dynamic_or_static(
-            Cond::new(ActivationSamplePolicy::Erlang { k: 3, lambda: 2.0 })
+            live_token(resolution, erlang(3, 2.0))
                 .gte_gt(|p| {
                     let bounds = Region::new(
                         phase_start(p.course.distance, Phase::MidRace),
@@ -903,7 +952,7 @@ pub fn build_catalog() -> ConditionCatalog {
     add(
         "compete_fight_count",
         dynamic_or_static(
-            Cond::new(ActivationSamplePolicy::Uniform)
+            live_token(resolution, ActivationSamplePolicy::Uniform)
                 .gt(|p| {
                     if !is_sorted_by_start(&p.course.straights) {
                         return Err(ConditionError::Invalid(
@@ -1090,7 +1139,10 @@ pub fn build_catalog() -> ConditionCatalog {
     );
     add(
         "infront_near_lane_time",
-        dynamic_or_static(noop_erlang(3, 2.0), "infront_near_lane_time"),
+        dynamic_or_static(
+            noop_live_token(resolution, 3, 2.0),
+            "infront_near_lane_time",
+        ),
     );
     add(
         "is_activate_other_skill_detail",
@@ -1346,15 +1398,15 @@ pub fn build_catalog() -> ConditionCatalog {
     );
     add(
         "is_move_lane",
-        dynamic_or_static(noop_erlang(5, 1.0), "is_move_lane"),
+        dynamic_or_static(noop_live_token(resolution, 5, 1.0), "is_move_lane"),
     );
     add(
         "is_overtake",
-        dynamic_or_static(noop_erlang(1, 2.0), "is_overtake"),
+        dynamic_or_static(noop_live_token(resolution, 1, 2.0), "is_overtake"),
     );
     add(
         "is_surrounded",
-        dynamic_or_static(noop_erlang(3, 2.0), "is_surrounded"),
+        dynamic_or_static(noop_live_token(resolution, 3, 2.0), "is_surrounded"),
     );
     add(
         "is_temptation",
@@ -1416,7 +1468,7 @@ pub fn build_catalog() -> ConditionCatalog {
     );
     add(
         "near_count",
-        dynamic_or_static(noop_erlang(3, 2.0), "near_count"),
+        dynamic_or_static(noop_live_token(resolution, 3, 2.0), "near_count"),
     );
 
     // --- order / position (dynamic registry) ---
@@ -1465,11 +1517,14 @@ pub fn build_catalog() -> ConditionCatalog {
     );
     add(
         "overtake_target_no_order_up_time",
-        dynamic_or_static(noop_erlang(3, 2.0), "overtake_target_no_order_up_time"),
+        dynamic_or_static(
+            noop_live_token(resolution, 3, 2.0),
+            "overtake_target_no_order_up_time",
+        ),
     );
     add(
         "overtake_target_time",
-        dynamic_or_static(noop_erlang(3, 2.0), "overtake_target_time"),
+        dynamic_or_static(noop_live_token(resolution, 3, 2.0), "overtake_target_time"),
     );
 
     // --- phase family ---
@@ -2080,12 +2135,12 @@ pub fn build_catalog() -> ConditionCatalog {
     );
     add(
         "near_infront_count",
-        dynamic_or_static(noop_erlang(3, 2.0), "near_infront_count"),
+        dynamic_or_static(noop_live_token(resolution, 3, 2.0), "near_infront_count"),
     );
     add(
         "is_other_character_activate_advantage_skill",
         dynamic_or_static(
-            noop_erlang(3, 2.0),
+            noop_live_token(resolution, 3, 2.0),
             "is_other_character_activate_advantage_skill",
         ),
     );
@@ -2435,7 +2490,7 @@ mod tests {
     }
 
     fn apply_with(condition: &str, resolution: ConditionResolution) -> ConditionResult {
-        let catalog = build_catalog();
+        let catalog = build_catalog_for(resolution);
         let parser = ConditionParser::new(&catalog);
         let op = parser.parse(condition).expect("parse");
         let course = course();
@@ -2453,7 +2508,7 @@ mod tests {
     }
 
     fn apply_bands(condition: &str, distance: f64, bands: Option<PhaseOrderRanges>) -> RegionList {
-        let catalog = build_catalog();
+        let catalog = build_catalog_for(ConditionResolution::Static);
         let parser = ConditionParser::new(&catalog);
         let op = parser.parse(condition).expect("parse");
         let mut course = course();
@@ -2479,7 +2534,7 @@ mod tests {
         // A vacuum run holds one runner. Judging a nine-runner band against
         // that field rejects it as invalid and kills the whole batch, so the
         // assumed size has to reach the resolver.
-        let catalog = build_catalog();
+        let catalog = build_catalog_for(ConditionResolution::Static);
         let parser = ConditionParser::new(&catalog);
         let op = parser.parse("order>=3").expect("parse");
         let mut course = course();
@@ -2685,7 +2740,6 @@ mod tests {
         // only the non-strict form removes a skill from the race silently.
         // Both resolutions are checked: a `dynamic_or_static` condition only
         // falls back to its static inner under `Static`.
-        let catalog = build_catalog();
         let course = course();
         let runner = runner();
         let extra = params();
@@ -2711,7 +2765,7 @@ mod tests {
 
         let mut gaps: Vec<String> = Vec::new();
         for resolution in [ConditionResolution::Dynamic, ConditionResolution::Static] {
-            for (name, cond) in &catalog {
+            for (name, cond) in &build_catalog_for(resolution) {
                 for (non_strict, strict) in
                     [(CmpKind::Lte, CmpKind::Lt), (CmpKind::Gte, CmpKind::Gt)]
                 {
@@ -3015,5 +3069,59 @@ mod tests {
         let cond = cond.expect("dynamic condition in normal mode");
         // DummyRunner has no order -> predicate is false.
         assert!(!cond.eval(&DummyRunner));
+    }
+
+    #[test]
+    fn live_tokens_fire_on_their_first_tick_only_where_a_live_field_resolves_them() {
+        // The contested engine checks these from the first tick of their
+        // window. The vacuum engine has no live field, so it keeps the port's
+        // policy for each; every other token reads the same in both.
+        use ActivationSamplePolicy::{FirstTick, Uniform};
+        let offline = [
+            ("bashin_diff_behind", erlang(3, 2.0)),
+            ("bashin_diff_infront", erlang(3, 2.0)),
+            ("behind_near_lane_time", erlang(3, 2.0)),
+            ("behind_near_lane_time_set1", erlang(3, 2.0)),
+            ("blocked_all_continuetime", erlang(3, 2.0)),
+            ("blocked_front", erlang(3, 2.0)),
+            ("blocked_front_continuetime", erlang(3, 2.0)),
+            ("blocked_side", erlang(3, 2.0)),
+            ("blocked_side_continuetime", erlang(3, 2.0)),
+            ("change_order_onetime", erlang(3, 2.0)),
+            ("change_order_up_end_after", erlang(3, 2.0)),
+            ("change_order_up_finalcorner_after", erlang(3, 2.0)),
+            ("change_order_up_middle", erlang(3, 2.0)),
+            ("compete_fight_count", Uniform),
+            ("infront_near_lane_time", erlang(3, 2.0)),
+            ("is_move_lane", erlang(5, 1.0)),
+            (
+                "is_other_character_activate_advantage_skill",
+                erlang(3, 2.0),
+            ),
+            ("is_overtake", erlang(1, 2.0)),
+            ("is_surrounded", erlang(3, 2.0)),
+            ("near_count", erlang(3, 2.0)),
+            ("near_infront_count", erlang(3, 2.0)),
+            ("overtake_target_no_order_up_time", erlang(3, 2.0)),
+            ("overtake_target_time", erlang(3, 2.0)),
+        ];
+        let live = build_catalog_for(ConditionResolution::Dynamic);
+        let vacuum = build_catalog_for(ConditionResolution::Static);
+        for (token, policy) in offline {
+            assert_eq!(live[token].sample_policy(), FirstTick, "{token}");
+            assert_eq!(vacuum[token].sample_policy(), policy, "{token}");
+        }
+        assert_eq!(live.len(), vacuum.len());
+        for (token, cond) in &live {
+            if offline.iter().any(|(t, _)| t == token) {
+                continue;
+            }
+            assert_ne!(cond.sample_policy(), FirstTick, "{token}");
+            assert_eq!(
+                cond.sample_policy(),
+                vacuum[token].sample_policy(),
+                "{token}"
+            );
+        }
     }
 }

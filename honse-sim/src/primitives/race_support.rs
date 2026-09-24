@@ -24,7 +24,7 @@ use crate::shared_kernel::rng::Prng;
 use crate::skills::condition::blocking::is_side_blocking;
 use crate::skills::condition::dynamic::{
     order_rate_band_holds, ActiveRunner, ConditionTimers, RunnerSnapshot as DynRunnerSnapshot,
-    ORDER_RATE_BANDS,
+    ORDER_CONTINUE_GRACE_SECONDS, ORDER_RATE_BANDS,
 };
 use crate::skills::effect::SkillTarget;
 
@@ -303,8 +303,6 @@ const NEAR_LANE_SET1_LANES: f64 = 2.7;
 /// recordings' lane resolution (1/10000 of the course width, 1.125 mm), so
 /// it only decides which side of the edge a pair that is on it falls.
 const NEAR_LANE_EDGE_TOLERANCE: f64 = 1e-9;
-/// The `*_continue` conditions ignore the first 5 s of the race (GameTora).
-const ORDER_CONTINUE_GRACE_SECONDS: f64 = 5.0;
 
 /// Advance every active runner's condition timers by one `dt` step and copy
 /// them into the snapshot, so the conditions read durations and histories
