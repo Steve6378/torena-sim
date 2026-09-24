@@ -17,8 +17,10 @@ use crate::skills::condition::dynamic::{
     bool_num, compare, register_dynamic_condition, DynamicCondition, RunnerView,
 };
 
-const SIDE_BLOCK_DISTANCE_METERS: f64 = 3.0;
-const SIDE_BLOCK_LANE_MULTIPLIER: f64 = 1.0;
+/// Side blocking reach along the course, either way (mechanics § Side Blocking).
+const SIDE_BLOCK_DISTANCE_METERS: f64 = 1.05;
+/// Side blocking reach across, in horse lanes either way (same section).
+const SIDE_BLOCK_LANE_MULTIPLIER: f64 = 2.0;
 const OVERTAKE_DISTANCE_METERS: f64 = 5.0;
 const OVERTAKE_LANE_MULTIPLIER: f64 = 2.0;
 const MOVING_LANE_EPSILON: f64 = 0.00001;
@@ -27,37 +29,24 @@ fn lane_threshold(runner: &dyn RunnerView, multiplier: f64) -> f64 {
     runner.horse_lane() * multiplier
 }
 
-/// `(left_blocked, right_blocked)` — whether a runner sits within the side-block
-/// window on each flank.
-fn side_blocking_state(runner: &dyn RunnerView) -> (bool, bool) {
-    let threshold = lane_threshold(runner, SIDE_BLOCK_LANE_MULTIPLIER);
-    let mut left_blocked = false;
-    let mut right_blocked = false;
-
-    for snapshot in runner.other_snapshots() {
-        let lane_delta = snapshot.current_lane - runner.current_lane();
-        let distance_delta = (snapshot.position - runner.position()).abs();
-
-        if lane_delta.abs() > threshold
-            || lane_delta.abs() < MOVING_LANE_EPSILON
-            || distance_delta > SIDE_BLOCK_DISTANCE_METERS
-        {
-            continue;
-        }
-
-        if lane_delta < 0.0 {
-            left_blocked = true;
-        } else {
-            right_blocked = true;
-        }
-    }
-
-    (left_blocked, right_blocked)
+/// Whether a runner `distance_gap` metres along the course and `lane_gap`
+/// metres across from another blocks her side (mechanics § Side Blocking):
+/// `abs(DistanceGap) < 1.05 m` and `abs(LaneGap) < 2 HorseLane`. The one
+/// window for the physics step's side block and every `blocked_side*` /
+/// `blocked_all*` condition, live field or not, so the two cannot disagree.
+pub fn is_side_blocking(distance_gap: f64, lane_gap: f64, horse_lane: f64) -> bool {
+    distance_gap.abs() < SIDE_BLOCK_DISTANCE_METERS
+        && lane_gap.abs() < SIDE_BLOCK_LANE_MULTIPLIER * horse_lane
 }
 
 fn has_side_blocking_runner(runner: &dyn RunnerView) -> bool {
-    let (left, right) = side_blocking_state(runner);
-    left || right
+    runner.other_snapshots().iter().any(|snapshot| {
+        is_side_blocking(
+            snapshot.position - runner.position(),
+            snapshot.current_lane - runner.current_lane(),
+            runner.horse_lane(),
+        )
+    })
 }
 
 fn is_overtaking_runner(runner: &dyn RunnerView) -> bool {
@@ -414,6 +403,43 @@ mod tests {
         };
         assert!(!cond.eval(&clear));
         assert!(factory(0, CmpKind::Eq).eval(&clear));
+    }
+
+    /// Without a live field the tokens read the same window as the timers and
+    /// the physics step (mechanics § Side Blocking): under 1.05 m along and
+    /// under two horse lanes across, a rival on the same line included. They
+    /// read 3 m and one lane.
+    #[test]
+    fn blocked_side_reads_the_documented_window() {
+        register_blocking_conditions();
+        let cond = get_dynamic_condition("blocked_side").expect("registered")(1, CmpKind::Eq);
+        let rival_at = |along: f64, across: f64| TestRunner {
+            position: 0.0,
+            current_lane: 3.0,
+            accumulate_time: 9.0,
+            snapshots: vec![snap(along, 3.0 + across, 0.0)],
+            ..Default::default()
+        };
+        // 2 m along, half a lane across: inside 3 m, outside 1.05 m.
+        assert!(!cond.eval(&rival_at(2.0, 0.5)));
+        assert!(!cond.eval(&rival_at(-2.0, -0.5)));
+        // Half a metre along, a lane and a half across: outside one lane,
+        // inside two.
+        assert!(cond.eval(&rival_at(0.5, 1.5)));
+        assert!(cond.eval(&rival_at(-0.5, -1.5)));
+        // On the same line.
+        assert!(cond.eval(&rival_at(0.5, 0.0)));
+        // Both edges are open.
+        assert!(!cond.eval(&rival_at(1.05, 0.0)));
+        assert!(!cond.eval(&rival_at(-1.05, 0.5)));
+        assert!(!cond.eval(&rival_at(0.5, 2.0)));
+
+        let continued = get_dynamic_condition("blocked_side_continuetime").expect("registered")(
+            2,
+            CmpKind::Gte,
+        );
+        assert!(!continued.eval(&rival_at(2.0, 0.5)));
+        assert!(continued.eval(&rival_at(0.5, 1.5)));
     }
 
     #[test]

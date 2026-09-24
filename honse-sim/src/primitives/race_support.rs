@@ -20,6 +20,7 @@ use crate::runner::Runner;
 use crate::shared_kernel::ids::RunnerId;
 use crate::shared_kernel::language::{strategy_matches, Phase, Strategy};
 use crate::shared_kernel::rng::Prng;
+use crate::skills::condition::blocking::is_side_blocking;
 use crate::skills::condition::dynamic::{
     order_rate_band_holds, ActiveRunner, ConditionTimers, RunnerSnapshot as DynRunnerSnapshot,
     ORDER_RATE_BANDS,
@@ -280,11 +281,6 @@ const NEAR_LANE_METERS: f64 = 2.5;
 const NEAR_LANE_LANES: f64 = 1.0;
 const NEAR_LANE_SET1_METERS: f64 = 5.0;
 const NEAR_LANE_SET1_LANES: f64 = 2.7;
-/// Side blocking: within 3 m along the course and 1 lane across, on another
-/// line (the window `blocked_side` already reads).
-const SIDE_BLOCK_METERS: f64 = 3.0;
-const SIDE_BLOCK_LANES: f64 = 1.0;
-const SIDE_BLOCK_LANE_EPSILON: f64 = 0.00001;
 /// The `*_continue` conditions ignore the first 5 s of the race (GameTora).
 const ORDER_CONTINUE_GRACE_SECONDS: f64 = 5.0;
 
@@ -368,10 +364,7 @@ pub fn update_condition_timers(
             if along > 0.0 && along <= NEAR_LANE_METERS && across <= NEAR_LANE_LANES * horse_lane {
                 near_infront = true;
             }
-            if along.abs() <= SIDE_BLOCK_METERS
-                && across <= SIDE_BLOCK_LANES * horse_lane
-                && across >= SIDE_BLOCK_LANE_EPSILON
-            {
+            if is_side_blocking(along, across, horse_lane) {
                 side_blocked = true;
             }
             if is_overtake_target(me, other) {
@@ -549,8 +542,6 @@ pub fn resolve_debuff_targets(
 
 /// Front blocking reach in meters (mechanics § Front Blocking).
 const FRONT_BLOCK_DISTANCE: f64 = 2.0;
-/// Side blocking reach in meters either way (mechanics § Side Blocking).
-const SIDE_BLOCK_DISTANCE: f64 = 1.05;
 
 /// The runner blocking `runner` in front (mechanics § Front Blocking): under
 /// 2 m ahead, within 0.75 horse lane when touching narrowing to 0.3 at the
@@ -580,7 +571,8 @@ pub fn front_blocking_runner(
 }
 
 /// Whether another runner sits beside `runner` (mechanics § Side Blocking):
-/// within 1.05 m ahead or behind and under two horse lanes across.
+/// under 1.05 m ahead or behind and under two horse lanes across
+/// ([`is_side_blocking`], the window the `blocked_side*` conditions read too).
 pub fn has_side_blocking_runner(
     runner: &Runner,
     snapshots: &[RunnerSnapshot],
@@ -588,8 +580,11 @@ pub fn has_side_blocking_runner(
 ) -> bool {
     snapshots.iter().any(|snapshot| {
         snapshot.id != runner.id
-            && (snapshot.position - runner.position).abs() < SIDE_BLOCK_DISTANCE
-            && (snapshot.current_lane - runner.current_lane).abs() < 2.0 * horse_lane
+            && is_side_blocking(
+                snapshot.position - runner.position,
+                snapshot.current_lane - runner.current_lane,
+                horse_lane,
+            )
     })
 }
 
@@ -926,6 +921,50 @@ mod tests {
         let t = tick(&mut pair(2.0, 1.5, (1, 2), (1, 2)), &mut tracker);
         assert_eq!(t.near_behind, 0.0, "1.5 lanes is outside the 1-lane window");
         assert!(t.near_behind_set1 > 0.0, "but inside set1's 2.7 lanes");
+    }
+
+    /// The side-block timers read the mechanics doc's window (§ Side
+    /// Blocking): under 1.05 m ahead or behind and under two horse lanes
+    /// across, the window the physics step's side block reads. They read 3 m
+    /// and one lane, and left out a rival on the same line.
+    #[test]
+    fn side_block_timers_read_the_documented_window() {
+        use crate::runner::test_support::test_runner;
+
+        let blocked = |gap: f64, lanes: f64, front_blocked: bool| {
+            let mut snap = pair(gap, lanes, (1, 2), (1, 2));
+            snap.entries[0].is_front_blocked = front_blocked;
+            let t = tick(&mut snap, &mut FieldOrderTracker::new());
+            (t.blocked_side > 0.0, t.blocked_all > 0.0)
+        };
+        // 2 m behind, half a lane across: inside 3 m, outside 1.05 m.
+        assert_eq!(blocked(2.0, 0.5, true), (false, false));
+        // Half a metre behind, a lane and a half across: outside one lane,
+        // inside two.
+        assert_eq!(blocked(0.5, 1.5, false), (true, false));
+        assert_eq!(blocked(0.5, 1.5, true), (true, true));
+        // On the same line.
+        assert_eq!(blocked(0.5, 0.0, false), (true, false));
+        // Just outside either edge.
+        assert_eq!(blocked(1.1, 0.0, false), (false, false));
+        assert_eq!(blocked(0.5, 2.1, false), (false, false));
+
+        // Wherever the rival is, the timer holds exactly when the physics
+        // step finds her side-blocking.
+        let mut me = test_runner(1, Strategy::FrontRunner);
+        me.position = 100.0;
+        me.current_lane = 0.0;
+        for gap in [0.0, 0.5, 1.0, 1.1, 2.0, 2.9, 3.5] {
+            for lanes in [0.0, 0.5, 0.9, 1.5, 1.9, 2.5] {
+                let snap = pair(gap, lanes, (1, 2), (1, 2));
+                let physics = has_side_blocking_runner(&me, &proximity_snapshots(&snap), LANE);
+                assert_eq!(
+                    blocked(gap, lanes, false).0,
+                    physics,
+                    "{gap} m behind, {lanes} lanes across"
+                );
+            }
+        }
     }
 
     #[test]
