@@ -82,6 +82,20 @@ pub struct LaneSelf {
     pub front_blocker: Option<RunnerId>,
 }
 
+impl LaneSelf {
+    /// The runner as the rest of the field sees her.
+    fn as_snapshot(&self) -> RunnerSnapshot {
+        RunnerSnapshot {
+            id: self.id,
+            position: self.position,
+            current_lane: self.current_lane,
+            current_speed: self.current_speed,
+            target_speed: self.target_speed,
+            is_front_blocked: self.front_blocker.is_some(),
+        }
+    }
+}
+
 /// Course constants the lane rules read.
 #[derive(Debug, Clone, Copy)]
 pub struct LaneCourse {
@@ -106,42 +120,64 @@ pub enum LaneMode {
 /// ahead within the visible distance, and across within a cone whose width
 /// grows from two horse lanes at zero distance to 13.5 at the limit.
 pub fn is_visible(me: &LaneSelf, other: &RunnerSnapshot, course: &LaneCourse) -> bool {
-    let distance_gap = other.position - me.position;
+    in_vision_cone(me.position, me.current_lane, other, course.horse_lane)
+}
+
+/// [`is_visible`] for a runner at `position` and `lane`.
+fn in_vision_cone(position: f64, lane: f64, other: &RunnerSnapshot, horse_lane: f64) -> bool {
+    let distance_gap = other.position - position;
     if !(0.0..=VISIBLE_DISTANCE).contains(&distance_gap) {
         return false;
     }
-    let half_width = ((distance_gap / VISIBLE_DISTANCE) * 11.5 * course.horse_lane
-        + 2.0 * course.horse_lane)
-        / 2.0;
-    (other.current_lane - me.current_lane).abs() <= half_width
+    let half_width =
+        ((distance_gap / VISIBLE_DISTANCE) * 11.5 * horse_lane + 2.0 * horse_lane) / 2.0;
+    (other.current_lane - lane).abs() <= half_width
 }
 
-/// The runners worth overtaking (mechanics § Overtake Targets): visible, 1 to
-/// 20 m ahead, catchable within 15 s at the current speed difference, and
-/// either slower by target speed or blocked and slower than the runner's own
-/// target. The closest front blocker is always one.
+/// Whether `other` is an overtake target of `me` (mechanics § Overtake
+/// Targets): visible, 1 to 20 m ahead, catchable within 15 s at the current
+/// speed difference, and either slower by target speed or blocked and slower
+/// than `me`'s own target. `me_blocked_by`, the runner blocking `me` in front,
+/// is always one.
+///
+/// Lane movement and the skill conditions (`is_overtake`,
+/// `overtake_target_time`, `overtake_target_no_order_up_time`) both read this
+/// one list.
+pub fn is_overtake_target(
+    me: &RunnerSnapshot,
+    me_blocked_by: Option<RunnerId>,
+    other: &RunnerSnapshot,
+    horse_lane: f64,
+) -> bool {
+    if other.id == me.id {
+        return false;
+    }
+    if me_blocked_by == Some(other.id) {
+        return true;
+    }
+    let distance_gap = other.position - me.position;
+    if !(1.0..=VISIBLE_DISTANCE).contains(&distance_gap)
+        || !in_vision_cone(me.position, me.current_lane, other, horse_lane)
+    {
+        return false;
+    }
+    let speed_gap = me.current_speed - other.current_speed;
+    let catchable = speed_gap > 0.0 && distance_gap / speed_gap < 15.0;
+    let slower = other.target_speed < me.target_speed
+        || (other.is_front_blocked && other.current_speed < me.target_speed);
+    catchable && slower
+}
+
+/// The runners worth overtaking: every [`is_overtake_target`] of `me`.
 pub fn overtake_targets<'a>(
     me: &LaneSelf,
     others: &'a [RunnerSnapshot],
     course: &LaneCourse,
 ) -> Vec<&'a RunnerSnapshot> {
+    let viewer = me.as_snapshot();
     others
         .iter()
-        .filter(|other| other.id != me.id)
-        .filter(|other| {
-            if me.front_blocker == Some(other.id) {
-                return true;
-            }
-            let distance_gap = other.position - me.position;
-            if !(1.0..=VISIBLE_DISTANCE).contains(&distance_gap) || !is_visible(me, other, course) {
-                return false;
-            }
-            let speed_gap = me.current_speed - other.current_speed;
-            let catchable = speed_gap > 0.0 && distance_gap / speed_gap < 15.0;
-            let slower = other.target_speed < me.target_speed
-                || (other.is_front_blocked && other.current_speed < me.target_speed);
-            catchable && slower
-        })
+        .filter(|other| is_overtake_target(&viewer, me.front_blocker, other, course.horse_lane))
         .collect()
 }
 

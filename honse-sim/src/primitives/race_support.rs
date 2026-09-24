@@ -14,6 +14,7 @@ use std::collections::HashMap;
 use crate::course::model::CourseData;
 use crate::course::phase::phase_start;
 use crate::pacing::{select_pacer, PacerBranch};
+use crate::runner::lane::is_overtake_target;
 use crate::runner::physics::{FrontBlock, RunnerSnapshot};
 use crate::runner::skills::FieldView;
 use crate::runner::Runner;
@@ -70,8 +71,8 @@ pub struct SnapEntry {
     pub current_speed: f64,
     /// Target speed.
     pub target_speed: f64,
-    /// Whether a runner blocked this one in front last tick.
-    pub is_front_blocked: bool,
+    /// The runner that blocked this one in front last tick, if any.
+    pub front_blocker: Option<RunnerId>,
     /// Immutable running style.
     pub strategy: Strategy,
     /// Starting gate.
@@ -86,6 +87,21 @@ pub struct SnapEntry {
     pub activated_advantage_effect_types: u64,
     /// Popularity rank (1 = most popular; `0` = unknown).
     pub popularity: i64,
+}
+
+impl SnapEntry {
+    /// The runner as the proximity reads (lane movement, blocking, overtake
+    /// targets) see her.
+    pub fn proximity_snapshot(&self) -> RunnerSnapshot {
+        RunnerSnapshot {
+            id: self.id,
+            position: self.position,
+            current_lane: self.current_lane,
+            current_speed: self.current_speed,
+            target_speed: self.target_speed,
+            is_front_blocked: self.front_blocker.is_some(),
+        }
+    }
 }
 
 /// Where on the course the `change_order_up_*` counters count passes: the
@@ -204,7 +220,7 @@ pub fn build_field_snapshot(
             current_lane: r.current_lane,
             current_speed: r.current_speed,
             target_speed: r.target_speed,
-            is_front_blocked: r.front_blocker.is_some(),
+            front_blocker: r.front_blocker,
             strategy: r.strategy,
             gate: r.gate,
             is_rushed: r.is_rushed,
@@ -270,11 +286,6 @@ pub fn build_field_snapshot(
     }
 }
 
-/// Seconds to look ahead for an overtake target (GameTora: "you can catch up
-/// with her within 15 seconds at the current speed").
-const OVERTAKE_CATCH_SECONDS: f64 = 15.0;
-/// How far ahead an overtake target can be (GameTora: "up to 20 meters").
-const OVERTAKE_RANGE_METERS: f64 = 20.0;
 /// `*_near_lane_time`: 2.5 m and 1 lane; `behind_near_lane_time_set1`: 5 m and
 /// 2.7 lanes (GameTora).
 const NEAR_LANE_METERS: f64 = 2.5;
@@ -283,17 +294,6 @@ const NEAR_LANE_SET1_METERS: f64 = 5.0;
 const NEAR_LANE_SET1_LANES: f64 = 2.7;
 /// The `*_continue` conditions ignore the first 5 s of the race (GameTora).
 const ORDER_CONTINUE_GRACE_SECONDS: f64 = 5.0;
-
-/// Whether `ahead` is an overtake target of `behind`: up to 20 m ahead, and
-/// caught within 15 s at the two runners' current speeds.
-fn is_overtake_target(behind: &SnapEntry, ahead: &SnapEntry) -> bool {
-    let gap = ahead.position - behind.position;
-    let closing = behind.current_speed - ahead.current_speed;
-    gap > 0.0
-        && gap <= OVERTAKE_RANGE_METERS
-        && closing > 0.0
-        && gap / closing <= OVERTAKE_CATCH_SECONDS
-}
 
 /// Advance every active runner's condition timers by one `dt` step and copy
 /// them into the snapshot, so the conditions read durations and histories
@@ -349,6 +349,7 @@ pub fn update_condition_timers(
         let mut side_blocked = false;
         let mut has_target = false;
         let mut is_target = false;
+        let seen = me.proximity_snapshot();
         for other in snapshot.entries.iter().filter(|e| e.id != me.id) {
             let along = other.position - me.position;
             let across = (other.current_lane - me.current_lane).abs();
@@ -367,10 +368,16 @@ pub fn update_condition_timers(
             if is_side_blocking(along, across, horse_lane) {
                 side_blocked = true;
             }
-            if is_overtake_target(me, other) {
+            // The overtake targets lane movement reads (mechanics § Overtake
+            // Targets), vision cone included. GameTora's note ("up to 20 m
+            // ahead, caught within 15 s") leaves the cone out: applied to the
+            // 117 recordings it predicts 210111 for 79.6% of its carriers,
+            // where 54.1% fired; the cone predicts 49.8%.
+            let other_seen = other.proximity_snapshot();
+            if is_overtake_target(&seen, me.front_blocker, &other_seen, horse_lane) {
                 has_target = true;
             }
-            if is_overtake_target(other, me) {
+            if is_overtake_target(&other_seen, other.front_blocker, &seen, horse_lane) {
                 is_target = true;
             }
         }
@@ -399,9 +406,10 @@ pub fn update_condition_timers(
         } else {
             step(near_infront, t.near_infront)
         };
-        t.blocked_front = step(me.is_front_blocked, t.blocked_front);
+        let front_blocked = me.front_blocker.is_some();
+        t.blocked_front = step(front_blocked, t.blocked_front);
         t.blocked_side = step(side_blocked, t.blocked_side);
-        t.blocked_all = step(me.is_front_blocked && side_blocked, t.blocked_all);
+        t.blocked_all = step(front_blocked && side_blocked, t.blocked_all);
         t.overtake_target_no_order_up = if moved_up {
             0.0
         } else {
@@ -441,14 +449,7 @@ pub fn proximity_snapshots(snapshot: &FieldSnapshot) -> Vec<RunnerSnapshot> {
     snapshot
         .entries
         .iter()
-        .map(|e| RunnerSnapshot {
-            id: e.id,
-            position: e.position,
-            current_lane: e.current_lane,
-            current_speed: e.current_speed,
-            target_speed: e.target_speed,
-            is_front_blocked: e.is_front_blocked,
-        })
+        .map(SnapEntry::proximity_snapshot)
         .collect()
 }
 
@@ -655,7 +656,7 @@ mod tests {
             current_lane: 0.0,
             current_speed: 20.0,
             target_speed: 20.0,
-            is_front_blocked: false,
+            front_blocker: None,
             strategy,
             gate: 0,
             is_rushed: false,
@@ -933,7 +934,8 @@ mod tests {
 
         let blocked = |gap: f64, lanes: f64, front_blocked: bool| {
             let mut snap = pair(gap, lanes, (1, 2), (1, 2));
-            snap.entries[0].is_front_blocked = front_blocked;
+            // Blocked in front by a runner outside the pair.
+            snap.entries[0].front_blocker = front_blocked.then_some(RunnerId(9));
             let t = tick(&mut snap, &mut FieldOrderTracker::new());
             (t.blocked_side > 0.0, t.blocked_all > 0.0)
         };
@@ -981,25 +983,111 @@ mod tests {
         assert!(!tick(&mut snap, &mut tracker).behind_is_inner);
     }
 
-    #[test]
-    fn overtake_target_is_up_to_20_m_ahead_and_caught_within_15_s() {
-        let mut tracker = FieldOrderTracker::new();
-        // b 10 m behind a and 1 m/s faster: catches in 10 s, a is b's target.
-        let mut snap = pair(10.0, 0.0, (1, 2), (1, 2));
+    /// [`pair`] with `b` 1 m/s faster than `a`, by current and by target
+    /// speed.
+    fn chase(gap: f64, lanes: f64) -> FieldSnapshot {
+        let mut snap = pair(gap, lanes, (1, 2), (1, 2));
         snap.entries[1].current_speed = 21.0;
-        update_condition_timers(&mut snap, &mut tracker, &[], DT, LANE);
-        assert!(snap.condition_timers[&RunnerId(2)].has_overtake_target);
-        assert!(snap.condition_timers[&RunnerId(1)].overtaken > 0.0);
+        snap.entries[1].target_speed = 21.0;
+        snap
+    }
+
+    /// One tick on a fresh tracker: whether `b` has an overtake target, and
+    /// whether `a` is one.
+    fn targets(mut snap: FieldSnapshot) -> (bool, bool) {
+        update_condition_timers(&mut snap, &mut FieldOrderTracker::new(), &[], DT, LANE);
+        (
+            snap.condition_timers[&RunnerId(2)].has_overtake_target,
+            snap.condition_timers[&RunnerId(1)].overtaken > 0.0,
+        )
+    }
+
+    #[test]
+    fn overtake_target_is_1_to_20_m_ahead_and_caught_within_15_s() {
+        // b 10 m behind a and 1 m/s faster: catches in 10 s, a is b's target.
+        assert_eq!(targets(chase(10.0, 0.0)), (true, true));
         // 0.5 m/s faster: 20 s to catch, no target.
-        let mut snap = pair(10.0, 0.0, (1, 2), (1, 2));
+        let mut snap = chase(10.0, 0.0);
         snap.entries[1].current_speed = 20.5;
-        update_condition_timers(&mut snap, &mut tracker, &[], DT, LANE);
-        assert!(!snap.condition_timers[&RunnerId(2)].has_overtake_target);
+        assert_eq!(targets(snap), (false, false));
         // 25 m ahead: out of range however fast.
-        let mut snap = pair(25.0, 0.0, (1, 2), (1, 2));
+        let mut snap = chase(25.0, 0.0);
         snap.entries[1].current_speed = 30.0;
-        update_condition_timers(&mut snap, &mut tracker, &[], DT, LANE);
-        assert!(!snap.condition_timers[&RunnerId(2)].has_overtake_target);
+        assert_eq!(targets(snap), (false, false));
+        // Under 1 m ahead: not a target however fast (mechanics § Overtake
+        // Targets: "between 1-20 m in front").
+        assert_eq!(targets(chase(0.5, 0.0)), (false, false));
+    }
+
+    /// Overtake targets are the ones lane movement reads (mechanics § Overtake
+    /// Targets), inside the vision cone (§ Vision): one horse lane either side
+    /// at the runner, widening to 6.75 at 20 m. GameTora's note ("up to 20 m
+    /// ahead, caught within 15 s") has no cone.
+    #[test]
+    fn overtake_target_is_inside_the_vision_cone() {
+        // 5 m ahead the cone reaches 2.44 lanes either side.
+        assert_eq!(targets(chase(5.0, 2.0)), (true, true));
+        assert_eq!(targets(chase(5.0, 3.0)), (false, false));
+        assert_eq!(targets(chase(5.0, -3.0)), (false, false));
+        // 15 m ahead (7.5 s to catch at 2 m/s) it reaches 5.31 lanes.
+        let wide = |lanes: f64| {
+            let mut snap = chase(15.0, lanes);
+            snap.entries[1].current_speed = 22.0;
+            targets(snap)
+        };
+        assert_eq!(wide(5.0), (true, true));
+        assert_eq!(wide(5.5), (false, false));
+    }
+
+    /// A target is slower by target speed, or blocked in front and slower than
+    /// the chaser's target speed; the runner blocking the chaser in front is
+    /// always one, however fast (mechanics § Overtake Targets).
+    #[test]
+    fn overtake_target_is_slower_by_target_speed_or_the_front_blocker() {
+        // a aims faster than b and runs free: not a target, although b closes
+        // on her at 1 m/s now.
+        let mut snap = chase(10.0, 0.0);
+        snap.entries[0].target_speed = 22.0;
+        assert_eq!(targets(snap), (false, false));
+        // The same a, blocked in front and slower than b's target: a target.
+        let mut snap = chase(10.0, 0.0);
+        snap.entries[0].target_speed = 22.0;
+        snap.entries[0].front_blocker = Some(RunnerId(9));
+        assert_eq!(targets(snap), (true, true));
+        // Half a metre ahead at the same speed, but blocking b in front.
+        let mut snap = pair(0.5, 0.0, (1, 2), (1, 2));
+        snap.entries[1].front_blocker = Some(RunnerId(1));
+        assert_eq!(targets(snap), (true, true));
+    }
+
+    /// `overtake_target_time` and `overtake_target_no_order_up_time` count the
+    /// same targets as `is_overtake`: a runner outside the cone never starts
+    /// either clock.
+    #[test]
+    fn overtake_timers_count_only_targets_in_the_vision_cone() {
+        let held = |lanes: f64| {
+            let mut tracker = FieldOrderTracker::new();
+            let mut t = HashMap::new();
+            for _ in 0..30 {
+                let mut snap = chase(5.0, lanes);
+                update_condition_timers(&mut snap, &mut tracker, &[], DT, LANE);
+                t = snap.condition_timers;
+            }
+            (
+                t[&RunnerId(2)].overtake_target_no_order_up,
+                t[&RunnerId(1)].overtaken,
+            )
+        };
+        let (no_order_up, overtaken) = held(2.0);
+        assert!(
+            (no_order_up - 2.0).abs() < 1e-9,
+            "30 frames = 2 s, got {no_order_up}"
+        );
+        assert!(
+            (overtaken - 2.0).abs() < 1e-9,
+            "30 frames = 2 s, got {overtaken}"
+        );
+        assert_eq!(held(3.0), (0.0, 0.0));
     }
 
     /// Runners passed, counted where the passer is: the Mid-Race `[D/6, 2D/3)`,
@@ -1183,12 +1271,13 @@ mod tests {
     fn overtake_target_timer_resets_on_moving_up_a_place() {
         let mut tracker = FieldOrderTracker::new();
         for _ in 0..30 {
-            let mut snap = pair(10.0, 0.0, (1, 2), (1, 2));
-            snap.entries[1].current_speed = 21.0;
+            let mut snap = chase(10.0, 0.0);
             update_condition_timers(&mut snap, &mut tracker, &[], DT, LANE);
         }
+        assert!(tracker.condition_timers[&RunnerId(2)].overtake_target_no_order_up > 1.9);
         let mut snap = pair(10.0, 0.0, (2, 1), (1, 2));
         snap.entries[1].current_speed = 21.0;
+        snap.entries[1].target_speed = 21.0;
         update_condition_timers(&mut snap, &mut tracker, &[], DT, LANE);
         assert_eq!(
             snap.condition_timers[&RunnerId(2)].overtake_target_no_order_up,

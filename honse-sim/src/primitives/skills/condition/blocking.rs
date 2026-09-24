@@ -122,9 +122,11 @@ pub fn register_blocking_conditions() {
         })
     });
 
-    // GameTora: an overtake target is an uma up to 20 m ahead that the runner
-    // catches within 15 s at the current speeds. The live field resolves it;
-    // without one, the older 5 m proxy stands.
+    // An overtake target is one lane movement would steer around (mechanics §
+    // Overtake Targets: in the vision cone, 1-20 m ahead, caught within 15 s,
+    // slower by target speed or blocked; the front blocker always), not
+    // GameTora's cone-less "up to 20 m ahead, caught within 15 s". The live
+    // field resolves it; without one, the older 5 m proxy stands.
     register_dynamic_condition("is_overtake", |arg, cmp| {
         DynamicCondition::new(move |r| {
             let has = match r.condition_timers() {

@@ -38,9 +38,11 @@ pub struct RunnerSnapshot {
 /// * `near_behind_set1`: the same with 5 m and 2.7 lanes.
 /// * `blocked_front` / `blocked_side` / `blocked_all`: seconds blocked in front,
 ///   on at least one side, and both at once, continuously.
-/// * `overtake_target_no_order_up`: seconds with at least one overtake target
-///   (an uma up to 20 m ahead that the runner catches within 15 s at the current
-///   speeds), reset when the runner moves up a place.
+/// * `overtake_target_no_order_up`: seconds with at least one overtake target,
+///   reset when the runner moves up a place. Not GameTora's definition ("up to
+///   20 m ahead, caught within 15 s"): the targets are the ones lane movement
+///   reads (mechanics § Overtake Targets; `lane::is_overtake_target`), inside
+///   the vision cone.
 /// * `overtaken`: seconds the runner has been someone else's overtake target.
 /// * `has_overtake_target`: this tick, by the same definition.
 /// * `behind_is_inner`: the uma directly behind in placement runs closer to the
