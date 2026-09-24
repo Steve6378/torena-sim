@@ -355,7 +355,7 @@ pub struct Runner {
     // --- rushed (temptation) state machine ---
     /// Whether the runner has already been rushed this round.
     pub has_been_rushed: bool,
-    /// The pre-determined rushed section (`-1` if none).
+    /// The pre-determined rushed section, 0-based (`-1` if none).
     pub rushed_section: i64,
     /// Position at which rushed activates.
     pub rushed_enter_position: f64,

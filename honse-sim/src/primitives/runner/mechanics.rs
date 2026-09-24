@@ -135,7 +135,12 @@ impl Runner {
         self.is_in_forced_rushed = false;
 
         if self.rushed_enabled && self.rushed_rng.random() < self.rushed_chance() {
-            self.rushed_section = 2 + i64::from(self.rushed_rng.uniform(8));
+            // The doc's "random section between 2 to 9" numbers the 24
+            // sections from 1, so the 0-based index here is 1..=8 and the
+            // spell begins 1 to 8 section lengths from the start. All 143
+            // recorded spells begin at one of those starts, 14 to 21 per
+            // section, and none at the ninth, which `2 + uniform(8)` reached.
+            self.rushed_section = 1 + i64::from(self.rushed_rng.uniform(8));
             self.rushed_enter_position = self.section_length * self.rushed_section as f64;
         }
     }
@@ -1042,6 +1047,76 @@ mod tests {
         exits.sort_unstable();
         exits.dedup();
         assert_eq!(exits, vec![45, 90, 135, 180, 225, 256]);
+    }
+
+    /// A runner on the 2400 m test course (100 m sections) whose pre-race
+    /// roll always rushes, rolled from its own `rushed_rng` stream.
+    fn always_rushed(seed: u32) -> crate::runner::Runner {
+        use crate::shared_kernel::rng::Xoshiro256StarStar;
+        let mut r = test_runner(0, Strategy::PaceChaser);
+        r.rushed_rng = Box::new(Xoshiro256StarStar::from_u32_seed(seed));
+        // Wit 1 puts the chance far above 1: (6.5 / log10(1.1))^2 % = 246.6%.
+        r.adjusted_stats.wit = 1.0;
+        r.initialize_rushed_state();
+        r
+    }
+
+    #[test]
+    fn rushed_section_is_the_docs_2_to_9_counted_from_1() {
+        // The doc numbers the 24 sections from 1 and rushes "in a random
+        // section between 2 to 9": 0-based 1..=8, entered 1 to 8 section
+        // lengths from the start. The recordings' 143 spells begin at those
+        // starts and never at the ninth (0-based 9).
+        let mut sections: Vec<i64> = (0..400u32)
+            .map(|seed| {
+                let r = always_rushed(seed);
+                assert!(
+                    (r.rushed_enter_position - r.section_length * r.rushed_section as f64).abs()
+                        < 1e-9,
+                    "the spell begins at its section's start"
+                );
+                r.rushed_section
+            })
+            .collect();
+        sections.sort_unstable();
+        sections.dedup();
+        assert_eq!(sections, (1..=8).collect::<Vec<i64>>());
+    }
+
+    #[test]
+    fn rushed_begins_on_the_first_tick_past_its_section_start() {
+        // Driven as `on_update` drives it: `update_rushed` reads the position
+        // before the tick's movement, 1.3 m a tick here (19.5 m/s), a step
+        // that never lands on a 100 m boundary.
+        let step = 1.3;
+        let (mut first, mut last) = (f64::INFINITY, 0.0_f64);
+        for seed in 0..400u32 {
+            let mut r = always_rushed(seed);
+            r.position = 0.0;
+            let start = loop {
+                r.update_rushed();
+                if r.is_rushed {
+                    break r.rushed_activations[0].0;
+                }
+                r.position += step;
+                assert!(r.position < 2400.0, "seed {seed} never rushed");
+            };
+            let past = start - (start / r.section_length).floor() * r.section_length;
+            assert!(
+                (0.0..step).contains(&past),
+                "seed {seed}: began {past} m past a section start"
+            );
+            first = first.min(start);
+            last = last.max(start);
+        }
+        assert!(
+            first < 200.0,
+            "earliest spell at {first} m: none in the doc's section 2 (100-200 m)"
+        );
+        assert!(
+            last < 900.0,
+            "latest spell at {last} m: the doc's section 10 (900-1000 m) is outside the window"
+        );
     }
 
     #[test]
