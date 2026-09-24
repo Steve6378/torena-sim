@@ -149,6 +149,11 @@ pub struct Race {
     /// Styles that already triggered spot struggle this round (each style
     /// triggers at most once per race).
     spot_struggle_triggered: Vec<Strategy>,
+    /// Duel proximity windows, one per (initiator, target) pair: whole ticks
+    /// the pair has stayed in the proximity box since its first tick there
+    /// (mechanics § Dueling: the target must remain a target for more than
+    /// 2 s). Rebuilt every tick by [`Race::coordinate_proximity_dueling`].
+    duel_windows: HashMap<(RunnerId, RunnerId), u32>,
 
     /// Lifecycle observers.
     observers: RaceObservers,
@@ -210,6 +215,7 @@ impl Race {
             common_skills: HashMap::new(),
             spot_struggle_unlocked: false,
             spot_struggle_triggered: Vec::new(),
+            duel_windows: HashMap::new(),
             observers: RaceObservers::new(),
             course,
         }
@@ -265,6 +271,7 @@ impl Race {
         self.order_tracker.order_up_windows = Some(OrderUpWindows::for_course(&self.course));
         self.spot_struggle_unlocked = false;
         self.spot_struggle_triggered.clear();
+        self.duel_windows.clear();
 
         self.prepare_race();
 
@@ -546,10 +553,17 @@ impl Race {
     /// A runner may begin dueling when it is in the top half of the field, on
     /// the final straight, and bunched together (distance/lane/speed) with at
     /// least one other top-half runner who is also on the final straight. Runs
-    /// as an aggregate pass so every runner observes the same field.
+    /// as an aggregate pass so every runner observes the same field. Called
+    /// once per [`FRAME_DT`] tick: the proximity windows count those ticks.
     fn coordinate_proximity_dueling(&mut self) {
         const MAX_DISTANCE_GAP: f64 = 3.0;
         const MAX_SPEED_GAP: f64 = 0.6;
+        /// `TargetContinueTime`: a target must stay in the box for more than
+        /// 2 s, that is more than 30 whole ticks of [`FRAME_DT`] (1/15 s).
+        /// Counted in ticks, not summed in seconds: 30 ticks of 1/15 s sum to
+        /// 1.9999999999999998 in f64, so a comparison in seconds would settle
+        /// the boundary by rounding error.
+        const TARGET_CONTINUE_TICKS: u32 = 30;
         /// `TargetContinueDistance`: exit once separated by >=5m (either
         /// direction) from every current-or-former duel participant.
         const EXIT_DISTANCE_GAP: f64 = 5.0;
@@ -609,75 +623,64 @@ impl Race {
             })
             .collect();
 
-        // Phase 2: decide each eligible runner's dueling transition.
+        // Phase 2: decide which eligible runners start a duel.
         //
         // The 2s window (`TargetContinueTime`) applies to PROXIMITY only
         // (<=3m, <=0.25*CourseWidth). Speed, HP, and placement are
         // single-frame checks once the window has elapsed
         // (hakuraku.moe/notes/dueling, "Which conditions must be maintained
-        // for 2 seconds?").
-        enum DuelDecision {
-            ClearCanDuel,
-            ArmCanDuel,
-            StartDuel,
-            None,
-        }
-        let mut decisions: Vec<(RunnerId, DuelDecision)> = Vec::new();
+        // for 2 seconds?"). The window belongs to the TARGET ("if the
+        // competition target remains a target for more than 2 seconds"):
+        // each (initiator, target) pair has its own, opened at 0 on the first
+        // tick the pair is in the box, advanced by one tick while it stays
+        // there, and dropped on the tick it leaves. It elapses on the 31st
+        // tick after the first (2.067 s), the first tick past 2 s. Swapping
+        // partners restarts the count; 2 s beside SOME uma is not enough.
+        // (The runner's own `can_duel` / `dueling_timer` belong to the vacuum
+        // engine's artificial dueling and are not read here.)
+        let mut windows: HashMap<(RunnerId, RunnerId), u32> = HashMap::new();
+        let mut starts: Vec<RunnerId> = Vec::new();
         for row in &rows {
             if !row.eligible {
                 continue;
             }
-            // Proximity partners sustain the window. Former duelers cannot be
+            // Proximity partners and their windows. Former duelers cannot be
             // targets; ACTIVE duelers can (joining an ongoing duel).
-            let partners: Vec<&Row> = rows
-                .iter()
-                .filter(|other| {
-                    other.id != row.id
-                        && !other.has_dueled
-                        && other.on_final_straight
-                        && (other.position - row.position).abs() <= MAX_DISTANCE_GAP
-                        && (other.lane - row.lane).abs() <= max_lane_gap
-                })
-                .collect();
-            if partners.is_empty() {
-                decisions.push((row.id, DuelDecision::ClearCanDuel));
-                continue;
+            let mut held: Vec<&Row> = Vec::new();
+            for other in rows.iter().filter(|other| {
+                other.id != row.id
+                    && !other.has_dueled
+                    && other.on_final_straight
+                    && (other.position - row.position).abs() <= MAX_DISTANCE_GAP
+                    && (other.lane - row.lane).abs() <= max_lane_gap
+            }) {
+                let pair = (row.id, other.id);
+                let window = self.duel_windows.get(&pair).map_or(0, |ticks| ticks + 1);
+                windows.insert(pair, window);
+                if window > TARGET_CONTINUE_TICKS {
+                    held.push(other);
+                }
             }
-            let Some(runner) = self.runners.iter().find(|r| r.id == row.id) else {
-                continue;
-            };
-            if runner.can_duel != Some(true) {
-                decisions.push((row.id, DuelDecision::ArmCanDuel));
-                continue;
-            }
-            if runner.dueling_timer.t < 2.0 {
-                decisions.push((row.id, DuelDecision::None));
-                continue;
-            }
-            // Trigger-frame checks: the initiator is on the final straight,
-            // both umas >=15% HP, speed gap <0.6 m/s, and at least ONE of the
-            // pair in the top half (that uma is the duel target - only the
-            // target needs the placement).
+            // Trigger-frame checks against the targets whose window has
+            // elapsed: the initiator is on the final straight, both umas
+            // >=15% HP, speed gap <0.6 m/s, and at least ONE of the pair in
+            // the top half (that uma is the duel target - only the target
+            // needs the placement). The conditions only need one frame to
+            // line up; the windows keep running while proximity holds.
             let row_top_half = matches!(row.order, Some(o) if o <= top_half_cutoff);
             let triggered = row.on_final_straight
                 && row.hp_ratio >= 0.15
-                && partners.iter().any(|p| {
+                && held.iter().any(|p| {
                     let p_top_half = matches!(p.order, Some(o) if o <= top_half_cutoff);
                     p.hp_ratio >= 0.15
                         && (p.speed - row.speed).abs() < MAX_SPEED_GAP
                         && (row_top_half || p_top_half)
                 });
-            decisions.push((
-                row.id,
-                if triggered {
-                    DuelDecision::StartDuel
-                } else {
-                    // Window persists while proximity holds; the trigger
-                    // conditions only need one frame to line up.
-                    DuelDecision::None
-                },
-            ));
+            if triggered {
+                starts.push(row.id);
+            }
         }
+        self.duel_windows = windows;
 
         // Phase 2b: distance-based exits. An active dueler leaves once she is
         // >=5m away (ahead OR behind) from EVERY current-or-former duel
@@ -699,20 +702,10 @@ impl Race {
         }
 
         // Phase 3: apply.
-        for (id, decision) in decisions {
+        for id in starts {
             if let Some(runner) = self.runners.iter_mut().find(|r| r.id == id) {
-                match decision {
-                    DuelDecision::ClearCanDuel => runner.can_duel = None,
-                    DuelDecision::ArmCanDuel => {
-                        runner.can_duel = Some(true);
-                        runner.dueling_timer.t = 0.0;
-                    }
-                    DuelDecision::StartDuel => {
-                        runner.is_dueling = true;
-                        runner.dueling_start_position = runner.position;
-                    }
-                    DuelDecision::None => {}
-                }
+                runner.is_dueling = true;
+                runner.dueling_start_position = runner.position;
             }
         }
         for id in exits {
@@ -1342,6 +1335,14 @@ mod tests {
         race
     }
 
+    /// Runs the duel coordinator for `ticks` race ticks of `FRAME_DT` each,
+    /// as `Race::on_update` does once a tick.
+    fn duel_ticks(race: &mut Race, ticks: u32) {
+        for _ in 0..ticks {
+            race.coordinate_proximity_dueling();
+        }
+    }
+
     #[test]
     fn external_debuff_routes_to_matching_strategy_not_self() {
         use uma_sim_primitives::race_support::build_field_snapshot;
@@ -1644,17 +1645,27 @@ mod tests {
         .collect();
 
         race.coordinate_proximity_dueling();
-        // The 2s window arms on PROXIMITY alone - every bunched pair arms,
-        // regardless of placement (rank is a trigger-frame check).
-        assert_eq!(race.runners[0].can_duel, Some(true));
-        assert_eq!(race.runners[1].can_duel, Some(true));
-        assert_eq!(race.runners[2].can_duel, Some(true));
+        // The 2s window opens on PROXIMITY alone - every bunched pair opens
+        // one, regardless of placement (rank is a trigger-frame check).
+        let pairs = [(0, 1), (1, 0), (2, 3), (3, 2)].map(|(a, b)| (RunnerId(a), RunnerId(b)));
+        for pair in pairs {
+            assert_eq!(race.duel_windows.get(&pair), Some(&0), "{pair:?}");
+        }
+        assert_eq!(race.duel_windows.len(), 4);
 
-        // After the 2s proximity window, the top-half pair starts dueling...
-        race.runners[0].dueling_timer.t = 2.0;
-        race.runners[2].dueling_timer.t = 2.0;
-        race.coordinate_proximity_dueling();
+        // 30 ticks later every pair has been in the box for exactly 2 s, not
+        // MORE than 2 s: nobody duels yet.
+        duel_ticks(&mut race, 30);
+        for pair in pairs {
+            assert_eq!(race.duel_windows.get(&pair), Some(&30), "{pair:?}");
+        }
+        assert!(race.runners.iter().all(|r| !r.is_dueling));
+
+        // Tick 31 (2.067 s), the first past 2 s: the top-half pair starts
+        // dueling...
+        duel_ticks(&mut race, 1);
         assert!(race.runners[0].is_dueling);
+        assert!(race.runners[1].is_dueling);
         assert_eq!(race.runners[0].dueling_start_position, 2300.0);
         // ...but the all-bottom-half pair cannot: neither is a valid target
         // (at least one of the pair must be in the top 50%).
@@ -1820,13 +1831,17 @@ mod tests {
         assert!(!race.runners[1].is_dueling);
         assert!(race.runners[1].has_dueled);
 
-        // Former duelers cannot rejoin: bunch everyone again, arm, and elapse
-        // the window - 0 and 1 stay out while 2 and 3 cannot duel either
+        // Former duelers cannot rejoin: bunch everyone again for 31 ticks,
+        // past 2 s - 0 and 1 neither open a window nor are anyone's target,
+        // while 2 and 3, whose window has elapsed, cannot duel either
         // (bottom-half pair), leaving no new duels.
         race.runners[0].position = 2300.0;
-        race.coordinate_proximity_dueling();
-        assert_eq!(race.runners[0].can_duel, None);
+        duel_ticks(&mut race, 31);
+        assert!(race.duel_windows.keys().all(|&(a, b)| a.0 >= 2 && b.0 >= 2));
+        assert!(race.duel_windows[&(RunnerId(2), RunnerId(3))] > 30);
         assert!(!race.runners[0].is_dueling);
+        assert!(!race.runners[2].is_dueling);
+        assert!(!race.runners[3].is_dueling);
     }
 
     #[test]
@@ -1854,20 +1869,120 @@ mod tests {
         race.runners[1].position = 2001.0;
 
         race.coordinate_proximity_dueling();
-        assert_eq!(race.runners[0].can_duel, Some(true));
+        assert_eq!(race.duel_windows.get(&(RunnerId(0), RunnerId(1))), Some(&0));
 
-        // Window elapsed but the initiator has not reached the straight yet:
-        // no duel on this frame.
-        race.runners[0].dueling_timer.t = 2.0;
-        race.coordinate_proximity_dueling();
+        // Tick 31: the window has passed 2 s, but the initiator has not
+        // reached the straight yet: no duel on this frame.
+        duel_ticks(&mut race, 31);
+        assert_eq!(
+            race.duel_windows.get(&(RunnerId(0), RunnerId(1))),
+            Some(&31)
+        );
         assert!(!race.runners[0].is_dueling);
 
         // The initiator reaches the straight: the duel fires immediately
         // (trigger conditions only need one frame).
         race.runners[0].position = 2001.0;
         race.runners[1].position = 2003.5;
-        race.coordinate_proximity_dueling();
+        duel_ticks(&mut race, 1);
         assert!(race.runners[0].is_dueling);
+    }
+
+    /// Mechanics § Dueling: "if the competition target remains a target for
+    /// more than 2 seconds". The window is the target's: 3.7 s beside SOME
+    /// uma, with the partner swapped part way, is not 2 s beside one.
+    #[test]
+    fn dueling_window_is_per_target_and_restarts_when_the_target_changes() {
+        let mut race = pace_chaser_race(3);
+        race.prepare_round(7);
+        race.course.straights = vec![uma_sim_primitives::course::model::Straight {
+            start: 2000.0,
+            end: 2400.0,
+            front_type: 0,
+        }];
+        race.order_tracker.runner_order = [(RunnerId(0), 1), (RunnerId(1), 2), (RunnerId(2), 3)]
+            .into_iter()
+            .collect();
+        for runner in &mut race.runners {
+            runner.current_lane = 0.5;
+            runner.current_speed = 18.0;
+            runner.is_dueling = false;
+            runner.has_dueled = false;
+        }
+        // 0 is boxed with 1 for 25 ticks (1.67 s)...
+        race.runners[0].position = 2100.0;
+        race.runners[1].position = 2101.0;
+        race.runners[2].position = 2150.0;
+        duel_ticks(&mut race, 1 + 25);
+        // ...then 1 drops away and 2 comes alongside for 30 ticks (2 s): 0
+        // has been beside some uma for 56 ticks (3.7 s), but never more than
+        // 2 s beside the same one, so no duel.
+        race.runners[1].position = 2150.0;
+        race.runners[2].position = 2101.0;
+        duel_ticks(&mut race, 1 + 30);
+        assert!(!race.duel_windows.contains_key(&(RunnerId(0), RunnerId(1))));
+        assert_eq!(
+            race.duel_windows.get(&(RunnerId(0), RunnerId(2))),
+            Some(&30)
+        );
+        assert!(!race.runners[0].is_dueling);
+
+        // Tick 31 with 2: that pair's window passes 2 s.
+        duel_ticks(&mut race, 1);
+        assert!(race.runners[0].is_dueling);
+    }
+
+    /// The trigger-frame checks run against the targets whose own window has
+    /// elapsed. A top-half uma who has only just come alongside is not a
+    /// target yet, however long the initiator has been beside someone else.
+    #[test]
+    fn dueling_triggers_only_through_a_target_whose_window_elapsed() {
+        let mut race = pace_chaser_race(4);
+        race.prepare_round(7);
+        race.course.straights = vec![uma_sim_primitives::course::model::Straight {
+            start: 2000.0,
+            end: 2400.0,
+            front_type: 0,
+        }];
+        // 0 and 1 are the top half (cutoff = ceil(4/2) = 2).
+        race.order_tracker.runner_order = [
+            (RunnerId(0), 1),
+            (RunnerId(1), 2),
+            (RunnerId(2), 3),
+            (RunnerId(3), 4),
+        ]
+        .into_iter()
+        .collect();
+        for runner in &mut race.runners {
+            runner.current_lane = 0.5;
+            runner.current_speed = 18.0;
+            runner.is_dueling = false;
+            runner.has_dueled = false;
+        }
+        race.runners[0].position = 2200.0;
+        race.runners[1].position = 2250.0;
+        race.runners[2].position = 2100.0;
+        race.runners[3].position = 2101.0;
+        // The bottom-half pair 2 and 3 run together for 22 ticks...
+        duel_ticks(&mut race, 1 + 22);
+        // ...then top-half 1 comes alongside 2. Eight ticks later 2 has held
+        // 3 for 31 ticks, past 2 s, but 3 cannot be the placement target and
+        // 1's window has only run 8 ticks: no duel.
+        race.runners[1].position = 2100.5;
+        duel_ticks(&mut race, 1 + 8);
+        assert_eq!(
+            race.duel_windows.get(&(RunnerId(2), RunnerId(3))),
+            Some(&31)
+        );
+        assert_eq!(race.duel_windows.get(&(RunnerId(2), RunnerId(1))), Some(&8));
+        assert!(!race.runners[2].is_dueling);
+
+        // 22 ticks on, 1's own window has run exactly 2 s: still no duel.
+        duel_ticks(&mut race, 22);
+        assert!(!race.runners[2].is_dueling);
+        // Tick 31, past 2 s: 2 duels with 1 as the target.
+        duel_ticks(&mut race, 1);
+        assert!(race.runners[2].is_dueling);
     }
 
     #[test]
