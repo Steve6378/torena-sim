@@ -664,22 +664,24 @@ impl Runner {
         while next < self.pending_skills.len() {
             let i = next;
             next += 1;
-            let (trigger, skill_id, forced) = {
+            let (skill_id, forced) = {
                 let s = &self.pending_skills[i];
-                (s.trigger, s.skill_id.0.clone(), s.forced)
+                (s.skill_id.0.clone(), s.forced)
             };
 
             let removal = self.pending_skill_removal.contains(&skill_id);
-            if self.position >= trigger.end && !removal {
-                // Passed this window: move on to the next placed trigger, if any
-                // (all_corner_random), else the skill is done.
+            if !removal {
+                // Passed this window: move on through every later window it
+                // has passed too (all_corner_random's placed triggers,
+                // FirstTick's regions) and check the one it is in on this same
+                // tick. Past the last one the skill is done.
+                let position = self.position;
                 let pending = &mut self.pending_skills[i];
-                if !pending.later_triggers.is_empty() {
+                while position >= pending.trigger.end && !pending.later_triggers.is_empty() {
                     pending.trigger = pending.later_triggers.remove(0);
-                    continue;
                 }
             }
-            if self.position >= trigger.end || removal {
+            if self.position >= self.pending_skills[i].trigger.end || removal {
                 self.pending_skills.remove(i);
                 self.pending_skill_removal.remove(&skill_id);
                 next = i;
@@ -2793,6 +2795,56 @@ mod tests {
         assert!(r.pending_skills.is_empty());
     }
 
+    /// A runner who passes a window checks the next one on the same tick
+    /// (mechanics doc § all_corner_random: "the condition is fulfilled if uma
+    /// is within one of the triggers"). Here two armed regions 0.5 m apart,
+    /// the second 1 m long: the tick that moves on is the only one inside it.
+    #[test]
+    fn a_passed_window_checks_the_next_on_the_same_tick() {
+        use crate::skills::condition::dynamic::ConditionTimers;
+        let skill = target_speed_skill(
+            "202401",
+            SkillRarity::Gold,
+            "phase==0&is_overtake==1@phase==2&is_overtake==1",
+        );
+        let target = |held: bool| FieldView {
+            condition_timers: Some(ConditionTimers {
+                has_overtake_target: held,
+                ..ConditionTimers::default()
+            }),
+            ..FieldView::default()
+        };
+        let runner = |later: Vec<Region>| {
+            let mut r = runner_with_skills(vec![skill.clone()]);
+            prepare(&mut r);
+            r.wit_checks_enabled = false;
+            r.pending_skills[0].trigger = Region::new(100.0, 110.0);
+            r.pending_skills[0].later_triggers = later;
+            r.position = 109.0;
+            r.process_skill_activations(&target(false), 2400.0);
+            r
+        };
+
+        // The next tick, 1.8 m on: inside the second window, a target held.
+        let mut r = runner(vec![Region::new(110.5, 111.5)]);
+        r.position = 110.8;
+        r.process_skill_activations(&target(true), 2400.0);
+        assert_eq!(r.skills_activated_count, 1, "the tick it moved on");
+
+        // Touching windows, as FirstTick arms two adjacent regions.
+        let mut r = runner(vec![Region::new(110.0, 120.0)]);
+        r.position = 110.8;
+        r.process_skill_activations(&target(true), 2400.0);
+        assert_eq!(r.skills_activated_count, 1, "touching windows");
+
+        // A tick that passes two windows checks the third, the one it is in.
+        let mut r = runner(vec![Region::new(110.2, 110.6), Region::new(110.7, 120.0)]);
+        r.position = 110.8;
+        r.process_skill_activations(&target(true), 2400.0);
+        assert_eq!(r.skills_activated_count, 1, "two windows passed at once");
+        assert_eq!(r.pending_skills.len(), 0, "spent");
+    }
+
     /// A rival-dependent token is checked from the first tick of every region
     /// of its window: here `is_overtake` in the Early-Race or the Late-Race.
     /// The port's Erlang policy armed one region, from a random offset in.
@@ -2964,6 +3016,42 @@ mod tests {
         let (count, speed) = fire(9.0);
         assert_eq!(count, 1);
         assert!((speed - 0.35).abs() < 1e-9, "{speed}");
+    }
+
+    /// The same shape across a window change: the first alternative moves on
+    /// to its next window on the tick the second's opens, and both hold
+    /// there. The first is checked on that tick and fires.
+    #[test]
+    fn the_first_alternative_that_holds_fires_on_a_window_change() {
+        let skill = two_alternative_skill(
+            "110101",
+            SkillRarity::Unique,
+            ["phase>=2&distance_diff_top<=5", "phase>=2"],
+            Some(5_000_000.0),
+        );
+        let mut r = runner_with_skills(vec![skill]);
+        prepare(&mut r);
+        assert_eq!(r.pending_skills.len(), 2, "both alternatives kept");
+        r.pending_skills[0].trigger = Region::new(100.0, 110.0);
+        r.pending_skills[0].later_triggers = vec![Region::new(110.5, 200.0)];
+        r.pending_skills[1].trigger = Region::new(110.5, 200.0);
+        r.pending_skills[1].later_triggers = Vec::new();
+        let leader = |r: &Runner, ahead: f64| FieldView {
+            leader_position: Some(r.position + ahead),
+            ..FieldView::default()
+        };
+        r.position = 109.0;
+        r.process_skill_activations(&leader(&r, 9.0), 2400.0);
+        assert_eq!(r.skills_activated_count, 0, "the leader 9 m ahead");
+        // The next tick, 1.8 m on, the leader 2 m ahead.
+        r.position = 110.8;
+        r.process_skill_activations(&leader(&r, 2.0), 2400.0);
+        assert_eq!(r.skills_activated_count, 1);
+        let speed = r.modifiers.target_speed.total();
+        assert!(
+            (speed - 0.45).abs() < 1e-9,
+            "the first alternative: {speed}"
+        );
     }
 
     /// 100671's shape (leader within 5 m, or not): one wit roll and one

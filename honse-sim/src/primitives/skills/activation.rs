@@ -204,21 +204,14 @@ impl ActivationSamplePolicy {
         }
     }
 
-    /// The windows `FirstTick` arms: every region in position order, touching
-    /// or overlapping ones joined. A pending skill moves on to its next
-    /// window on the tick after it passes the current one's end, so two
-    /// windows that touch would lose that tick.
+    /// The windows `FirstTick` arms: every region, in position order. A
+    /// pending skill that passes a window moves on through every window it
+    /// has passed and checks the one it is in on the same tick, so touching
+    /// or overlapping windows need no joining.
     fn armed_windows(regions: &RegionList) -> Vec<Region> {
         let mut sorted = regions.0.clone();
         sorted.sort_by(|a, b| a.start.total_cmp(&b.start));
-        let mut windows: Vec<Region> = Vec::with_capacity(sorted.len());
-        for region in sorted {
-            match windows.last_mut() {
-                Some(last) if region.start <= last.end => last.end = last.end.max(region.end),
-                _ => windows.push(region),
-            }
-        }
-        windows
+        sorted
     }
 
     /// Length-weighted point sampling (`RandomPolicy` / `CornerRandomPolicy`).
@@ -548,12 +541,15 @@ mod tests {
         let mut a = Xoshiro256StarStar::from_u64_seed(5);
         let mut b = Xoshiro256StarStar::from_u64_seed(5);
         let policy = ActivationSamplePolicy::FirstTick;
-        // Touching windows join: the skill must not lose the tick between.
         assert_eq!(
             policy.sample_sets(&r, 4, &mut a),
-            vec![vec![Region::new(0.0, 300.0), Region::new(800.0, 1200.0)]]
+            vec![vec![
+                Region::new(0.0, 100.0),
+                Region::new(100.0, 300.0),
+                Region::new(800.0, 1200.0)
+            ]]
         );
-        assert_eq!(policy.sample(&r, 4, &mut a), vec![Region::new(0.0, 300.0)]);
+        assert_eq!(policy.sample(&r, 4, &mut a), vec![Region::new(0.0, 100.0)]);
         assert!(policy.sample_sets(&RegionList::new(), 1, &mut a).is_empty());
         assert_eq!(a.uniform(1_000_000), b.uniform(1_000_000), "no RNG drawn");
     }
