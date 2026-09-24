@@ -40,6 +40,10 @@ use self::lifecycle::RunnerAptitudes;
 use self::physics::{Hill, SpeedModifiers};
 use self::stats::RunnerStats;
 
+/// One tick of the race clock, in seconds (15 a second). Both engines step
+/// every runner by it, and a skill's cooldown counts whole ticks of it.
+pub const FRAME_DT: f64 = 1.0 / 15.0;
+
 /// A `[start, end)` region used by scripted forced-state overrides.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ForcedRegion {

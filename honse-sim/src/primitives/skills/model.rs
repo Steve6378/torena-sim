@@ -445,9 +445,10 @@ pub struct PendingSkill {
     /// Later trigger windows, position-ordered (all_corner_random places up
     /// to 4); the skill moves to the next when it passes the current one.
     pub later_triggers: Vec<Region>,
-    /// Race time before which a cooled-down skill cannot activate again
-    /// (`NEG_INFINITY` until its first activation: the race clock starts at
-    /// -1 s, before the gate).
+    /// Race time of the first tick a cooled-down skill may activate again on:
+    /// its last activation + its effect's duration + `cooldown` in whole ticks,
+    /// starting when the effect ends (`NEG_INFINITY` until its first
+    /// activation: the race clock starts at -1 s, before the gate).
     pub ready_at: f64,
     /// Whether this skill's once-per-race wit check has already passed.
     pub wit_passed: bool,

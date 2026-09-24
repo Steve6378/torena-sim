@@ -15,7 +15,7 @@
 use std::collections::HashSet;
 
 use crate::runner::lifecycle::PrepareContext;
-use crate::runner::{Runner, UsedTargetedSkill};
+use crate::runner::{Runner, UsedTargetedSkill, FRAME_DT};
 use crate::shared_kernel::ids::SkillId;
 use crate::shared_kernel::language::Strategy;
 use crate::shared_kernel::math::Timer;
@@ -696,11 +696,15 @@ impl Runner {
                 let passed = skip || self.do_wit_check();
                 let skill = self.pending_skills[i].clone();
                 if passed {
-                    self.activate_skill(&skill, course_distance);
+                    let duration = self.activate_skill(&skill, course_distance);
+                    // The cooldown starts on the tick the effect ends, both
+                    // counted in whole ticks (the recordings; see below).
+                    let ready_at = self.accumulate_time.t
+                        + ready_ticks(duration, skill.cooldown, FRAME_DT) * FRAME_DT;
                     // One skill, one cooldown: its other alternatives wait it
                     // out too, and without a cooldown the skill is spent.
                     let until = if skill.cooldown > 0.0 {
-                        self.accumulate_time.t + skill.cooldown
+                        ready_at
                     } else {
                         f64::INFINITY
                     };
@@ -708,15 +712,42 @@ impl Runner {
                     // Mechanics doc § Skill Cooldown: a skill with a cooldown may
                     // activate again once it has elapsed, in its own window or at
                     // a later placed trigger (all_corner_random). The wit check
-                    // is once per race. Single-window skills were held out of
-                    // this while the lane-time conditions read the race clock:
-                    // re-armed, See Ya Later! and Slipstream repeated for 30% of
-                    // carriers against 3-4% on the 117 recordings. With those
-                    // conditions timed (patch 0020) they repeat for 6.7% and
-                    // 8.0%: still about twice the recordings, where never
-                    // repeating could not produce the 27 recorded repeats.
+                    // is once per race. The doc does not say when the cooldown
+                    // starts. On the 117 recordings all 43 repeats (201662,
+                    // 201651, 200331, 200332, 200342) come after activation +
+                    // duration + cooldown, none between activation + cooldown
+                    // and that point, and 13 of the 27 near-lane repeats fire in
+                    // a spell already running there: from its ready tick the
+                    // skill fires on the first tick its condition holds, not on
+                    // a fresh spell. The ready tick is counted in whole ticks
+                    // (`ready_ticks`): the effect ends on the first tick its
+                    // duration has run, and the cooldown counts whole ticks from
+                    // that one. On the game's 0.0666 s tick, n1 the first
+                    // firing's, that is n1 + ceil(duration / tick) +
+                    // ceil(cooldown / tick), and none of the 43 comes before it.
+                    // Three See Ya Later! (201662) repeats whose condition held
+                    // before it fired exactly on it: 10908-r0039 runner 2
+                    // (2600 m, 1290 = 118 + 1172 ticks after the first firing),
+                    // 10611-r0077 runner 0 (1600 m, 794 = 73 + 721) and
+                    // 10104-r0045 runner 2 (2000 m, 992 = 91 + 901): one tick
+                    // after the tick on which duration + cooldown has elapsed,
+                    // where a comparison of times fires. 10504-r0065 runner 6
+                    // (2000 m) fired on it, 992 ticks after, whatever her
+                    // condition did, so the ready tick comes no later. One
+                    // other form fits all 43: the elapsed tick + 1, n1 +
+                    // ceil((duration + cooldown) / tick) + 1. It comes a tick
+                    // later where the two remainders sum past a tick, for the
+                    // 3 s skills at 1700 m, the 1.8 s skills 200461 and 200462
+                    // at 1400, 1700 and 1800 m, which never repeat on the
+                    // recordings, and the 2.4 s corner skills (200331, 200332)
+                    // at 1400 to 1800 m; no recorded repeat decides
+                    // there (the one at 1700 m fired 8 ticks late, on its own
+                    // timer). On the engine's 1/15 s tick the 30 s base
+                    // cooldown is whole ticks on every course that is a
+                    // multiple of 20 m, so there this count is the elapsed tick
+                    // itself: under this form the recordings' extra tick is the
+                    // game's tick rounding.
                     if skill.cooldown > 0.0 {
-                        let now = self.accumulate_time.t;
                         let same = |p: &PendingSkill| {
                             p.skill_id == skill.skill_id
                                 && p.trigger == skill.trigger
@@ -729,7 +760,7 @@ impl Runner {
                         };
                         if let Some(at) = at {
                             let pending = &mut self.pending_skills[at];
-                            pending.ready_at = now + skill.cooldown;
+                            pending.ready_at = ready_at;
                             pending.wit_passed = true;
                         }
                         continue;
@@ -845,10 +876,18 @@ impl Runner {
         let skill = &self.pending_skills[idx];
         self.position >= skill.trigger.start
             && self.position < skill.trigger.end
-            && self.accumulate_time.t >= skill.ready_at
+            && self.tick_reached(skill.ready_at)
             && (skill.forced
                 || (DynamicPrecondition::is_met(skill.precondition.as_ref())
                     && self.pending_extra_passes(idx, field)))
+    }
+
+    /// Whether this tick is the one at race time `at` or later. `at` is a tick
+    /// of the runner's clock (or infinite), and the two are compared in whole
+    /// ticks of [`FRAME_DT`], so float rounding in either sum cannot move the
+    /// answer by a tick.
+    fn tick_reached(&self, at: f64) -> bool {
+        (self.accumulate_time.t / FRAME_DT).round() >= (at / FRAME_DT).round()
     }
 
     /// Hold the skill's other exclusive alternatives until race time `until`
@@ -927,7 +966,20 @@ impl Runner {
         }
     }
 
-    fn activate_skill(&mut self, skill: &PendingSkill, course_distance: f64) {
+    /// Apply the skill's effects; returns how long the skill runs, in seconds
+    /// (its longest effect as applied; 0 when every effect is instant).
+    ///
+    /// The cooldown starts when that duration ends. Which duration the game
+    /// counts is not determined where a skill's effects differ: the longest
+    /// here includes held additional-activation effects, which may never
+    /// fire, and effects routed to other runners, and an overtake that
+    /// lengthens a code-4 skill (`on_order_up`) does not move `ready_at`. The
+    /// recorded repeats cover only plain self-buffs: in the skill data the
+    /// only cooldown that comes back within a race is the 30 s base one (20
+    /// skills, 16 of them carried on the 117 recordings), and every one of
+    /// those applies its effects to the runner herself, none held, none with
+    /// a duration scaling.
+    fn activate_skill(&mut self, skill: &PendingSkill, course_distance: f64) -> f64 {
         let mut specs = skill.effects.clone();
         specs.sort_by_key(|e| i32::from(e.effect_type as i32 == 42));
         let base_skill_id = skill.skill_id.base().to_owned();
@@ -1022,6 +1074,7 @@ impl Runner {
         self.fire_held_additional_effects(|held| {
             (held.trigger == 2 || held.trigger == 3) && held.skill.skill_id != activated
         });
+        skill_duration
     }
 
     fn apply_self_effect(
@@ -1102,14 +1155,13 @@ impl Runner {
     fn activate_random_gold_skill(&mut self, count: usize, course_distance: f64) {
         // A skill still cooling down after firing (kept pending for a later
         // trigger, patch 0019) is not a candidate: it has already activated.
-        let now = self.accumulate_time.t;
         let mut gold_indices: Vec<usize> = self
             .pending_skills
             .iter()
             .enumerate()
             .filter(|(_, skill)| {
                 let gold = matches!(skill.rarity, SkillRarity::Gold | SkillRarity::Evolution);
-                gold && now >= skill.ready_at
+                gold && self.tick_reached(skill.ready_at)
                     && skill.effects.iter().all(|e| (e.effect_type as i32) > 5)
             })
             .map(|(idx, _)| idx)
@@ -1374,6 +1426,16 @@ fn active_targeted(
         origin: meta.origin,
         source_runner_id: meta.source_runner_id,
     }
+}
+
+/// Ticks of `tick` seconds from a skill's activation to the first tick it may
+/// activate again: its effect ends on the first whole tick its `duration` has
+/// run, and the `cooldown` counts whole ticks from that one.
+fn ready_ticks(duration: f64, cooldown: f64, tick: f64) -> f64 {
+    // A span of whole ticks up to float rounding (3.0 x 2600 / 1000 s is
+    // 7.800000000000001, 117 ticks of 1/15 s) is that many ticks, not one more.
+    let whole = |seconds: f64| (seconds / tick - 1e-9).ceil();
+    whole(duration) + whole(cooldown)
 }
 
 /// Drain expired (timer ≥ 0) self active skills, returning their modifiers so the
@@ -1657,7 +1719,13 @@ mod tests {
     }
 
     fn prepare(r: &mut Runner) {
-        let course = test_course();
+        prepare_on(r, test_course().distance);
+    }
+
+    /// `prepare` on a course of `distance` metres (cooldowns scale with it).
+    fn prepare_on(r: &mut Runner, distance: f64) {
+        let mut course = test_course();
+        course.distance = distance;
         let catalog = build_catalog();
         let parser = ConditionParser::new(&catalog);
         let rp = test_race_params();
@@ -2297,6 +2365,81 @@ mod tests {
             .all(|a| a.skill_id.as_str() != "200002"));
     }
 
+    /// A gold is a candidate for ActivateRandomGold from its ready tick,
+    /// counted in whole ticks as for its own condition, and not a tick
+    /// before. See Ya Later!'s shape (3 s, 30 s base cooldown) as a gold at
+    /// 2600 m fires on its own condition; a carrier that forces one gold
+    /// fires on the tick before the gold's ready tick or on the ready tick
+    /// itself, where the gold's own condition does not hold. A comparison of
+    /// the clock's float sum with activation + duration + cooldown leaves the
+    /// gold out on its ready tick after each of these 60 first firings.
+    #[test]
+    fn a_gold_is_forced_from_its_exact_ready_tick() {
+        use crate::skills::condition::dynamic::ConditionTimers;
+        const DISTANCE: f64 = 2600.0;
+        let mut carrier =
+            target_speed_skill("110071", SkillRarity::White, "infront_near_lane_time>=3");
+        carrier.alternatives[0].effects.push(RawSkillEffect {
+            modifier: 10000.0,
+            target: SkillTarget::SelfTarget,
+            effect_type: 37, // ActivateRandomGold
+            value_usage: None,
+            value_level_usage: None,
+            pre_applied_multiplier: None,
+            additional_activate_type: None,
+        });
+        let mut gold = target_speed_skill("201662", SkillRarity::Gold, "behind_near_lane_time>=3");
+        gold.alternatives[0].effects[0].modifier = 3500.0;
+        gold.alternatives[0].cooldown_time = Some(300000.0);
+        let field = |near_behind: f64, near_infront: f64| FieldView {
+            condition_timers: Some(ConditionTimers {
+                near_behind,
+                near_infront,
+                ..ConditionTimers::default()
+            }),
+            ..FieldView::default()
+        };
+        let ready = ready_ticks(
+            3.0 * (DISTANCE / 1000.0),
+            30.0 * DISTANCE / 1000.0,
+            FRAME_DT,
+        ) as u32;
+        let mut wrong = Vec::new();
+        // First firings 15 ticks apart from tick 150, over most of a race.
+        for first in (150_u32..1050).step_by(15) {
+            for (after, forced) in [(ready - 1, false), (ready, true)] {
+                let mut r = runner_with_skills(vec![carrier.clone(), gold.clone()]);
+                prepare_on(&mut r, DISTANCE);
+                r.wit_checks_enabled = false;
+                // Both armed over the whole race, whatever window each drew.
+                assert_eq!(r.pending_skills.len(), 2, "the carrier and the gold");
+                for pending in &mut r.pending_skills {
+                    pending.trigger = Region::new(0.0, DISTANCE);
+                }
+                r.position = 1000.0;
+                // The clock steps a tick at a time, as in the race.
+                for _ in 0..first {
+                    r.accumulate_time.advance(FRAME_DT);
+                }
+                r.process_skill_activations(&field(30.0, 0.0), DISTANCE);
+                assert_eq!(r.skills_activated_count, 1, "tick {first}: the gold");
+                for _ in 0..after {
+                    r.accumulate_time.advance(FRAME_DT);
+                }
+                r.process_skill_activations(&field(0.0, 30.0), DISTANCE);
+                // The carrier, and the gold again if it was a candidate.
+                let expected = if forced { 3 } else { 2 };
+                if r.skills_activated_count != expected {
+                    wrong.push((first, after, r.skills_activated_count));
+                }
+            }
+        }
+        assert!(
+            wrong.is_empty(),
+            "ready after {ready} ticks; (first firing, carrier after, fired) {wrong:?}"
+        );
+    }
+
     fn activate_first(r: &mut Runner, field: &FieldView) {
         let trigger = r.pending_skills[0].trigger;
         r.position = trigger.start + 0.5;
@@ -2450,7 +2593,9 @@ mod tests {
         assert_eq!(r.skills_activated_count, 1, "inside the cooldown");
 
         // Same again with the cooldown elapsed: it fires, without a new wit
-        // roll (checks on).
+        // roll (checks on). The cooldown runs from the end of the effect
+        // (3 s x 2400 / 1000 = 7.2 s), so the trigger reached 73 s after the
+        // activation is still inside it and the one reached at 80 s is not.
         let mut skill = target_speed_skill("200331", SkillRarity::White, "phase>=2");
         skill.alternatives[0].cooldown_time = Some(300000.0);
         let mut r = runner_with_skills(vec![skill]);
@@ -2467,14 +2612,19 @@ mod tests {
         r.accumulate_time.advance(73.0);
         r.position = start + 25.0;
         r.process_skill_activations(&FieldView::at_gate(), 2400.0);
+        assert_eq!(r.skills_activated_count, 1, "inside effect + cooldown");
+        r.accumulate_time.advance(7.0);
+        r.position = start + 26.0;
+        r.process_skill_activations(&FieldView::at_gate(), 2400.0);
         assert_eq!(r.skills_activated_count, 2, "after the cooldown");
     }
 
     #[test]
     fn a_single_window_skill_fires_again_after_its_cooldown() {
-        // See Ya Later!'s shape: one window, a 30 s base cooldown (72 s at
-        // 2400 m). It stays armed inside its window and fires again once the
-        // cooldown has run.
+        // See Ya Later!'s shape: one window, a 3 s effect and a 30 s base
+        // cooldown (7.2 s and 72 s at 2400 m). It stays armed inside its
+        // window and fires again once the effect and then the cooldown have
+        // run.
         let mut skill = target_speed_skill("201662", SkillRarity::White, "phase>=2");
         skill.alternatives[0].cooldown_time = Some(300000.0);
         let mut r = runner_with_skills(vec![skill]);
@@ -2486,9 +2636,137 @@ mod tests {
         r.accumulate_time.advance(71.0);
         r.process_skill_activations(&FieldView::at_gate(), 2400.0);
         assert_eq!(r.skills_activated_count, 1, "inside the cooldown");
-        r.accumulate_time.advance(1.5);
+        r.accumulate_time.advance(8.5);
         r.process_skill_activations(&FieldView::at_gate(), 2400.0);
         assert_eq!(r.skills_activated_count, 2, "after the cooldown");
+    }
+
+    /// The cooldown starts when the effect ends, not at the activation: ready
+    /// = activation + duration + cooldown, each x distance / 1000 and counted
+    /// in whole ticks. None of the 43 repeats on the 117 recordings (201662,
+    /// 201651, 200331, 200332, 200342) falls between activation + cooldown and
+    /// that point.
+    #[test]
+    fn the_cooldown_runs_from_the_end_of_the_effect() {
+        // See Ya Later!'s shape at 2400 m: a 7.2 s effect, a 72 s cooldown.
+        let mut skill = target_speed_skill("201662", SkillRarity::White, "phase>=2");
+        skill.alternatives[0].cooldown_time = Some(300000.0);
+        let mut r = runner_with_skills(vec![skill]);
+        prepare(&mut r);
+        r.wit_checks_enabled = false;
+        activate_first(&mut r, &FieldView::at_gate());
+        let fired_at = r.accumulate_time.t;
+        let ready = ready_ticks(7.2, 72.0, FRAME_DT);
+        assert!(
+            (r.pending_skills[0].ready_at - (fired_at + ready * FRAME_DT)).abs() < 1e-9,
+            "ready {} after the activation",
+            r.pending_skills[0].ready_at - fired_at
+        );
+        // The condition holds throughout, as a near-lane spell still running
+        // at the end of the cooldown does: it waits for the effect's 7.2 s.
+        r.accumulate_time.advance(72.5);
+        r.process_skill_activations(&FieldView::at_gate(), 2400.0);
+        assert_eq!(
+            r.skills_activated_count, 1,
+            "cooldown counted from the activation"
+        );
+        r.accumulate_time.t = fired_at + (ready - 1.0) * FRAME_DT;
+        r.process_skill_activations(&FieldView::at_gate(), 2400.0);
+        assert_eq!(r.skills_activated_count, 1, "a tick short");
+        r.accumulate_time.t = fired_at + ready * FRAME_DT;
+        r.process_skill_activations(&FieldView::at_gate(), 2400.0);
+        assert_eq!(r.skills_activated_count, 2, "the ready tick");
+    }
+
+    /// Whole ticks from an activation to the ready tick: the effect's, then
+    /// the cooldown's from the tick it ends. On the game's 0.0666 s tick they
+    /// are the recorded gaps between See Ya Later!'s (201662: 3 s, 30 s base
+    /// cooldown) two firings where her condition held before the second:
+    /// 10908-r0039 runner 2 at 2600 m (ticks 348 and 1638), 10611-r0077
+    /// runner 0 at 1600 m (190 and 984) and 10104-r0045 runner 2 at 2000 m
+    /// (240 and 1232). At 1700 m this form gives 843 where the elapsed tick +
+    /// 1, the other form the recordings allow, gives 844. On 1/15 s ticks the
+    /// engine's float products (3.0 x 2.6 = 7.800000000000001 s) still count
+    /// as the whole ticks they are.
+    #[test]
+    fn ready_ticks_count_the_effect_then_the_cooldown_in_whole_ticks() {
+        const GAME_TICK: f64 = 0.0666;
+        // As the engine computes them: base x distance / 1000.
+        let see_ya_later = |distance: f64, tick: f64| {
+            let duration = 3.0 * (distance / 1000.0);
+            let cooldown = 300000.0 / 10000.0 * distance / 1000.0;
+            ready_ticks(duration, cooldown, tick)
+        };
+        assert_eq!(see_ya_later(2600.0, GAME_TICK), 1290.0, "118 + 1172");
+        assert_eq!(see_ya_later(1600.0, GAME_TICK), 794.0, "73 + 721");
+        assert_eq!(see_ya_later(2000.0, GAME_TICK), 992.0, "91 + 901");
+        assert_eq!(see_ya_later(1700.0, GAME_TICK), 843.0, "77 + 766");
+        assert_eq!(see_ya_later(2600.0, 1.0 / 15.0), 1287.0, "117 + 1170");
+        assert_eq!(see_ya_later(1600.0, 1.0 / 15.0), 792.0, "72 + 720");
+        assert_eq!(ready_ticks(0.0, 72.0, 1.0 / 15.0), 1080.0, "instant");
+    }
+
+    /// A skill re-armed into a condition that already holds fires again on
+    /// its ready tick, ceil(duration / tick) + ceil(cooldown / tick) ticks
+    /// after its activation on the engine's tick, and not before, whichever
+    /// tick it first fired on: a comparison of the clock's float sum with
+    /// activation + duration + cooldown put it a tick late on some. See Ya
+    /// Later! (201662) as 10908-r0039 runner 2 (2600 m) and 10611-r0077
+    /// runner 0 (1600 m) carried it, the uma behind held near throughout.
+    #[test]
+    fn a_re_armed_skill_fires_on_its_ready_tick_counted_in_whole_ticks() {
+        use crate::skills::condition::dynamic::ConditionTimers;
+        let mut skill = target_speed_skill(
+            "201662",
+            SkillRarity::White,
+            "behind_near_lane_time>=3&accumulatetime>=10",
+        );
+        skill.alternatives[0].effects[0].modifier = 3500.0;
+        skill.alternatives[0].cooldown_time = Some(300000.0);
+        let spell = FieldView {
+            condition_timers: Some(ConditionTimers {
+                near_behind: 30.0,
+                ..ConditionTimers::default()
+            }),
+            ..FieldView::default()
+        };
+        for distance in [2600.0, 1600.0] {
+            let ready = ready_ticks(
+                3.0 * (distance / 1000.0),
+                30.0 * distance / 1000.0,
+                FRAME_DT,
+            );
+            let mut late = Vec::new();
+            // First firings a second apart from 10 s, over most of a race.
+            for first in (0..900).step_by(15) {
+                let mut r = runner_with_skills(vec![skill.clone()]);
+                prepare_on(&mut r, distance);
+                r.wit_checks_enabled = false;
+                // The clock steps a tick at a time, as in the race.
+                while r.accumulate_time.t < 10.0 {
+                    r.accumulate_time.advance(FRAME_DT);
+                }
+                for _ in 0..first {
+                    r.accumulate_time.advance(FRAME_DT);
+                }
+                r.position = r.pending_skills[0].trigger.start + 0.5;
+                r.process_skill_activations(&spell, distance);
+                assert_eq!(r.skills_activated_count, 1, "{distance} m: first firing");
+                let mut ticks = 0.0;
+                while r.skills_activated_count == 1 && ticks <= ready + 2.0 {
+                    r.accumulate_time.advance(FRAME_DT);
+                    r.process_skill_activations(&spell, distance);
+                    ticks += 1.0;
+                }
+                if ticks != ready {
+                    late.push((first, ticks));
+                }
+            }
+            assert!(
+                late.is_empty(),
+                "{distance} m: ready after {ready} ticks; (ticks past 10 s, fired after) {late:?}"
+            );
+        }
     }
 
     #[test]
@@ -2596,8 +2874,8 @@ mod tests {
     }
 
     /// 100671's shape (leader within 5 m, or not): one wit roll and one
-    /// cooldown (30 s base: 72 s at 2400 m) for the skill, whichever
-    /// alternative fires.
+    /// cooldown (30 s base: 72 s at 2400 m, from the end of the 7.2 s effect)
+    /// for the skill, whichever alternative fires.
     #[test]
     fn exclusive_alternatives_share_one_wit_check_and_one_cooldown() {
         let runner = |rolls: Vec<f64>| {
@@ -2627,6 +2905,12 @@ mod tests {
             "the second, inside the cooldown"
         );
         r.accumulate_time.advance(63.0);
+        run_ticks(&mut r, 9.0, 1);
+        assert_eq!(
+            r.skills_activated_count, 1,
+            "the second, 73 s on: inside effect + cooldown"
+        );
+        r.accumulate_time.advance(7.0);
         run_ticks(&mut r, 9.0, 1);
         assert_eq!(
             r.skills_activated_count, 2,

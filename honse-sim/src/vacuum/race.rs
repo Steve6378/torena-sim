@@ -39,8 +39,8 @@ use uma_sim_primitives::skills::condition::{ConditionCatalog, ConditionResolutio
 use uma_sim_primitives::stamina::game_policy::GameStaminaPolicy;
 use uma_sim_primitives::stamina::policy::{NoopStaminaPolicy, StaminaPolicy};
 
-/// Frame duration (15 FPS).
-const FRAME_DT: f64 = 1.0 / 15.0;
+/// Frame duration: one tick of the runner kernel's clock.
+const FRAME_DT: f64 = uma_sim_primitives::runner::FRAME_DT;
 
 /// Toggles and tuning that configure a simulation run.
 #[derive(Debug, Clone)]
