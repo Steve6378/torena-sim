@@ -45,7 +45,12 @@ mod conserve_power {
     pub(super) const SPOT_STRUGGLE_DECAY: f64 = 0.95;
     /// Gauge multiplier applied by Rushed on a conserve check.
     pub(super) const RUSHED_DECAY: f64 = 0.8;
-    /// Conserve checks run every ~1.5 seconds at 15 FPS.
+    /// Conserve checks run every ~1.5 seconds (the doc's "every 1.5
+    /// seconds"): every 23 fifteenths of a second of the race clock (1.533 s),
+    /// the port's 23 frames at 15 frames a second. Read on the clock, so the
+    /// 0.0666 s tick keeps the cadence (one check in each of the first 170).
+    /// The gauge gates nothing (`FULLY_CHARGED_THRESHOLD`), so the cadence has
+    /// no effect on a race.
     pub(super) const CHECK_FRAMES: i64 = 23;
     /// Spot Struggle release activity coefficient.
     pub(super) const SPOT_STRUGGLE_ACTIVITY_COEF: f64 = 0.98;
@@ -65,11 +70,14 @@ mod rushed {
     /// Chance of snapping out on a roll.
     pub(super) const SNAP_CHANCE: f64 = 0.55;
     /// Tolerance used when testing whether the rushed timer has reached a
-    /// cadence mark. The timer accumulates `1/15 s` in `f64`, so a mark can
-    /// land a few ULP *below* its exact value (6 s arrives as
-    /// `5.999999999999998`, 9 s as `8.999999999999988`). The tolerance is
-    /// many orders of magnitude smaller than a tick, so it only decides
-    /// which side of a boundary a tick that *is* the mark falls on.
+    /// cadence mark. The timer accumulates the tick in `f64`, so a mark that
+    /// is a whole number of ticks can land a few ULP *below* its exact value
+    /// (on a 1/15 s tick 6 s arrived as `5.999999999999998`, 9 s as
+    /// `8.999999999999988`). The tolerance is many orders of magnitude
+    /// smaller than a tick, so it only decides which side of a boundary a
+    /// tick that *is* the mark falls on. On the game's 0.0666 s tick no mark
+    /// is a whole number of ticks: they fall on ticks 46, 91 and 136, the cap
+    /// on 181.
     pub(super) const SNAP_MARK_TOLERANCE: f64 = 1e-9;
 }
 
@@ -374,6 +382,18 @@ impl Runner {
 
     // ===================== downhill =====================
 
+    /// Whole fifteenths of a second on the race clock: the index the
+    /// once-a-second downhill checks and the Conserve Power cadence read.
+    /// The port counted 15 frames a second, so on its 1/15 s tick this was
+    /// the tick. The rules are the doc's seconds, so they stay on the clock:
+    /// at 0.0666 s a tick is shorter than a fifteenth, so every fifteenth
+    /// holds a tick (two in 4 of the first 3995), and each of the first 265
+    /// seconds exactly one in its last fifteenth, the last tick before the
+    /// whole second.
+    fn clock_fifteenths(&self) -> i64 {
+        (self.accumulate_time.seconds() * 15.0).floor() as i64
+    }
+
     /// `updateDownhillMode`: enter/exit downhill (HP-saving) mode.
     pub(crate) fn update_downhill_mode(&mut self, downhill_enabled: bool) {
         if !self.forced_downhill_regions.is_empty() {
@@ -389,7 +409,9 @@ impl Runner {
             return;
         }
 
-        let current_frame = (self.accumulate_time.t * 15.0).floor() as i64;
+        // "Every second" (mechanics § Slope Modifier): on the tick in the last
+        // fifteenth of each second of the race clock, as the port has it.
+        let current_frame = self.clock_fifteenths();
         let change_second = current_frame % 15 == 14;
         if !change_second || current_frame == self.last_downhill_check_frame {
             return;
@@ -428,7 +450,7 @@ impl Runner {
         let on_downhill = self.current_hill_index != -1 && self.slope_per < 0.0;
         let active = inside && on_downhill;
         if active && !self.is_downhill_mode {
-            self.downhill_mode_start = Some((self.accumulate_time.t * 15.0).floor() as i64);
+            self.downhill_mode_start = Some(self.clock_fifteenths());
         } else if !active {
             self.downhill_mode_start = None;
         }
@@ -629,7 +651,7 @@ impl Runner {
             self.conserve_power_saw_spot_struggle = true;
         }
 
-        let current_frame = (self.accumulate_time.t * 15.0).floor() as i64;
+        let current_frame = self.clock_fifteenths();
         if current_frame <= 0
             || current_frame == self.last_conserve_power_check_frame
             || current_frame % conserve_power::CHECK_FRAMES != 0
@@ -767,7 +789,9 @@ impl Runner {
 #[cfg(test)]
 mod tests {
     use crate::runner::test_support::test_runner;
+    use crate::runner::FRAME_DT;
     use crate::shared_kernel::language::{DistanceType, Strategy};
+    use crate::shared_kernel::math::RaceClock;
     use crate::skills::effect::PositionKeepState;
 
     #[test]
@@ -984,8 +1008,8 @@ mod tests {
         assert!((r.rushed_chance() - (base - 0.06)).abs() < 1e-12);
     }
 
-    /// Drive a rushed spell one 1/15 s tick at a time and report the tick on
-    /// which it ended. `on_update` advances the timers (`update_timers`) before
+    /// Drive a rushed spell one tick at a time and report the tick on which
+    /// it ended. `on_update` advances the timers (`update_timers`) before
     /// it runs the mechanic updates, so the timer is advanced first here too
     /// and `update_rushed` sees the same values it sees in a race.
     fn rushed_exit_tick(seed: u32, max_duration: f64) -> i64 {
@@ -998,7 +1022,7 @@ mod tests {
         r.enter_rushed();
         r.rushed_max_duration = max_duration;
         for tick in 1..=600 {
-            r.rushed_timer.advance(1.0 / 15.0);
+            r.rushed_timer.advance(FRAME_DT);
             r.update_rushed();
             if !r.is_rushed {
                 return tick;
@@ -1011,10 +1035,12 @@ mod tests {
     fn rushed_rerolls_the_snap_out_at_every_three_second_mark() {
         // The doc: "Every 3 seconds while rushed, the uma has a 55% chance to
         // snap out of it. Rushed ends if the uma is still affected after 12
-        // seconds." At 15 FPS the marks are ticks 45 / 90 / 135, and the cap
-        // lands on tick 181 (12 s of accumulated 1/15 s is 11.999999999999977
-        // at tick 180). Before the look-back detector was replaced only the
-        // first mark ever fired, so the duration was binary: 45 or 181.
+        // seconds." On the game's 0.0666 s tick the marks are the first ticks
+        // past 3, 6 and 9 s, 46 / 91 / 136 (45 ticks are 2.997 s), and the
+        // cap lands on tick 181 (180 ticks are 11.988 s). On a 1/15 s tick
+        // they were 45 / 90 / 135 and 181. Before the look-back detector was
+        // replaced only the first mark ever fired, so the duration was
+        // binary.
         let mut exits: Vec<i64> = (0..400u32)
             .map(|seed| rushed_exit_tick(seed, 12.0))
             .collect();
@@ -1022,14 +1048,14 @@ mod tests {
         exits.dedup();
         assert_eq!(
             exits,
-            vec![45, 90, 135, 181],
+            vec![46, 91, 136, 181],
             "snap-out must be re-rolled at 3 s, 6 s and 9 s, with the 12 s cap as the last exit"
         );
 
         // Each mark is an independent 55% roll, so the survival rates are
         // 45% / 20.25% / 9.11% - i.e. about 55% of spells end on the first.
         let first = (0..400u32)
-            .filter(|&seed| rushed_exit_tick(seed, 12.0) == 45)
+            .filter(|&seed| rushed_exit_tick(seed, 12.0) == 46)
             .count();
         assert!(
             (150..=290).contains(&first),
@@ -1046,7 +1072,7 @@ mod tests {
             .collect();
         exits.sort_unstable();
         exits.dedup();
-        assert_eq!(exits, vec![45, 90, 135, 180, 225, 256]);
+        assert_eq!(exits, vec![46, 91, 136, 181, 226, 256]);
     }
 
     /// A runner on the 2400 m test course (100 m sections) whose pre-race
@@ -1185,12 +1211,13 @@ mod tests {
         r.current_hill_index = 0;
         r.slope_per = -1.0;
         r.position = 1100.0;
-        r.accumulate_time.t = 2.0;
+        // Tick 31 reads 2.0646 s, in the clock's 30th fifteenth.
+        r.accumulate_time = RaceClock::after_ticks(31, FRAME_DT);
         r.update_downhill_mode(false);
         assert_eq!(r.downhill_mode_start, Some(30));
 
-        for tick in 1..=10 {
-            r.accumulate_time.t = 2.0 + f64::from(tick) / 15.0;
+        for _ in 1..=10 {
+            r.accumulate_time.advance(FRAME_DT);
             r.position += 1.5;
             r.update_downhill_mode(false);
             assert!(r.is_downhill_mode);
@@ -1229,12 +1256,14 @@ mod tests {
     fn power_conservation_gains_by_position_keep_state() {
         let mut r = test_runner(0, Strategy::PaceChaser);
         r.conserve_power_stat = 1300.0;
-        r.accumulate_time.t = 23.0 / 15.0;
+        // Tick 24 (1.598 s) is the first in the clock's 23rd fifteenth, tick
+        // 47 (3.130 s) the first in its 46th.
+        r.accumulate_time = RaceClock::after_ticks(24, FRAME_DT);
         r.position_keep_state = PositionKeepState::None;
         r.update_power_conservation();
         assert!((r.conserved_power - 4.2).abs() < 1e-9);
 
-        r.accumulate_time.t = 46.0 / 15.0;
+        r.accumulate_time = RaceClock::after_ticks(47, FRAME_DT);
         r.position_keep_state = PositionKeepState::PaceDown;
         r.update_power_conservation();
         assert!((r.conserved_power - 10.9).abs() < 1e-9);
@@ -1244,7 +1273,7 @@ mod tests {
     fn power_conservation_applies_activity_decay() {
         let mut r = test_runner(0, Strategy::PaceChaser);
         r.conserve_power_stat = 1300.0;
-        r.accumulate_time.t = 23.0 / 15.0;
+        r.accumulate_time = RaceClock::after_ticks(24, FRAME_DT);
         r.position_keep_state = PositionKeepState::None;
         r.in_spot_struggle = true;
         r.is_rushed = true;

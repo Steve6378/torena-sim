@@ -39,7 +39,13 @@ use honse_sim::contested::{run_race_sim, RaceSimResult};
 use serde::{Deserialize, Serialize};
 use uma_sim_wasm::dto::{WasmForcedRegion, WasmRaceSimParams};
 
-const TICK_SECONDS: f64 = 1.0 / 15.0;
+/// The engine's tick, the game's 0.0666 s: simulated frame times are the
+/// game's own float32 clock values. The 117 tournament recordings carry that
+/// clock bit for bit (15,840 of 15,840 frame times), so there a recorded
+/// frame's time is a simulated frame's. The 53 captures in this crate round it
+/// to 1 ms: 6,281 of their 6,334 frame times, all but the 53 at t = 0, are off
+/// it by up to 0.495 ms.
+const TICK_SECONDS: f64 = honse_sim::runner::FRAME_DT;
 /// `SimulateEventType.SKILL` in both the game replay and `RaceReplay`.
 const EVENT_SKILL: i8 = 3;
 const DEFAULT_SAMPLES: usize = 8;
@@ -63,9 +69,10 @@ const BLOCKED_SHARE_TOLERANCE: f64 = 0.01;
 /// 12 seconds" (`docs/mechanics/README.md`, Rushed State), so a spell lasts
 /// 3, 6, 9 or 12 s and nothing in between.
 const RUSHED_LADDER: [f64; 4] = [3.0, 6.0, 9.0, 12.0];
-/// Slack when placing a measured span on the ladder. Spans are multiples of a
-/// tick (1/15 s) and the engine replay stores frame times as `f32`, so a span
-/// that is exactly a rung can land a hair above it.
+/// Slack when placing a measured span on the ladder. Spans are differences of
+/// `f32` frame times, so a span that is exactly a rung can land a hair above
+/// it. On the game's 0.0666 s tick no rung is a whole number of ticks: a
+/// simulated spell's frames span 2.997, 5.994, 8.991 or 11.988 s.
 const LADDER_EPSILON: f64 = 1e-3;
 /// `temptationMode` as the recording carries it: the enum value, not a flag.
 const TEMPTATION_MODES: [(i64, &str); 4] = [(1, "SASHI"), (2, "SENKO"), (3, "NIGE"), (4, "BOOST")];
@@ -779,8 +786,11 @@ fn spearman(sim_order: &[i32], observed_order: &[i32]) -> f64 {
 }
 
 /// The simulated sample nearest `time`, matched by frame time rather than
-/// index: the engine's replay starts at the first tick while the game records
-/// a frame at 0, so indexes are one tick apart. `None` once the replay ends.
+/// index: the game records every tick only near the start and the finish, the
+/// engine every tick. Both clocks are the float32 sum of the 0.0666 s tick, so
+/// the nearest frame is the one at the recorded tick: at exactly `time` for a
+/// tournament recording, within 0.5 ms of it for a capture in this crate,
+/// which rounds its times to 1 ms. `None` once the replay ends.
 fn sim_sample_at(
     replay: &RaceReplay,
     gate: usize,
@@ -1579,10 +1589,10 @@ fn a_spell_running_into_the_last_sample_still_counts() {
 
 #[test]
 fn tick_resolution_spells_land_on_their_ladder_rung() {
-    // The engine ticks at 1/15 s: a 3 s spell shows up in 45 frames spanning
-    // 44 ticks, a 12 s one in 181 frames spanning 180 ticks. Both must land on
-    // their own rung rather than one below.
-    for (ticks, rung) in [(45usize, 0usize), (90, 1), (135, 2), (181, 3)] {
+    // The engine ticks at 0.0666 s: a 3 s spell shows up in 46 frames
+    // spanning 45 ticks (2.997 s), a 12 s one in 181 frames spanning 180
+    // ticks (11.988 s). Each must land on its own rung rather than one above.
+    for (ticks, rung) in [(46usize, 0usize), (91, 1), (136, 2), (181, 3)] {
         let times: Vec<f64> = (0..400).map(|i| f64::from(i) * TICK_SECONDS).collect();
         let mut rushed = vec![false; 400];
         for flag in rushed.iter_mut().skip(10).take(ticks) {
@@ -1602,8 +1612,8 @@ fn the_duration_metric_sees_what_rushed_agreement_cannot() {
     // the recording shows a 3 s one still scores ~0.99, because the frames it
     // gets wrong are a rounding error in the pool.
     let mut errors = FrameErrors::default();
-    // Frames of a 3 s spell against frames of a 12 s one, at a 1/15 s tick.
-    let recorded_frames = 45;
+    // Frames of a 3 s spell against frames of a 12 s one, at a 0.0666 s tick.
+    let recorded_frames = 46;
     let simulated_frames = 181;
     for frame in 0..10_000 {
         let observed_rushed = f64::from(u8::from(frame < recorded_frames));
@@ -1627,7 +1637,7 @@ fn the_duration_metric_sees_what_rushed_agreement_cannot() {
     let mut recorded = SpellTally::default();
     let mut simulated = SpellTally::default();
     let mut flags = vec![false; 400];
-    flags[..45].fill(true);
+    flags[..46].fill(true);
     recorded.add_series(&times, &flags);
     let mut flags = vec![false; 400];
     flags[..181].fill(true);

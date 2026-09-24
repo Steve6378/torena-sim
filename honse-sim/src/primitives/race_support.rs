@@ -335,7 +335,7 @@ pub fn update_condition_timers(
         let elapsed = runners
             .iter()
             .find(|r| r.id == me.id)
-            .map_or(0.0, |r| r.accumulate_time.t);
+            .map_or(0.0, |r| r.accumulate_time.seconds());
         // Runners she passed this tick: ahead of her on the previous tick's
         // order, behind her on this one.
         let passed = match (order, previous) {
@@ -692,6 +692,7 @@ pub fn assign_gates(fixed: &[Option<i64>], gate_count: usize, rng: &mut dyn Prng
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::shared_kernel::math::RaceClock;
     use std::collections::HashMap;
 
     fn entry(id: u32, position: f64, strategy: Strategy) -> SnapEntry {
@@ -906,7 +907,7 @@ mod tests {
 
     // --- condition timers (GameTora's skill-condition viewer, 23 Sep 2026) ---
 
-    const DT: f64 = 1.0 / 15.0;
+    const DT: f64 = crate::runner::FRAME_DT;
     const LANE: f64 = 1.5;
 
     /// A two-runner field: `a` at 100 m, `b` behind it by `gap` metres and
@@ -939,8 +940,8 @@ mod tests {
             t = tick(&mut pair(2.0, 0.0, (1, 2), (1, 2)), &mut tracker);
         }
         assert!(
-            (t.near_behind - 2.0).abs() < 1e-9,
-            "30 frames = 2 s, got {}",
+            (t.near_behind - 1.998).abs() < 1e-6,
+            "30 ticks = 1.998 s, got {}",
             t.near_behind
         );
         // Out of range (3 m) for one frame: back to zero.
@@ -948,6 +949,26 @@ mod tests {
         assert_eq!(t.near_behind, 0.0);
         // But within the set1 window (5 m, 2.7 lanes).
         assert!(t.near_behind_set1 > 2.0);
+    }
+
+    /// The near-lane timers are the doc's seconds, summed a tick at a time:
+    /// on the game's 0.0666 s tick a pair in the window reads 3 s on its 46th
+    /// tick there, not its 45th (2.997 s). The recordings fire
+    /// `behind_near_lane_time>=3` skills 46 ticks after a steep along-gap
+    /// entry (89 of 107 first firings; 12 at 47, 6 at 45). On a 1/15 s tick
+    /// 45 ticks read 3.0000000000000027 s.
+    #[test]
+    fn near_lane_timers_reach_three_seconds_on_the_46th_tick() {
+        let mut tracker = FieldOrderTracker::new();
+        let mut t = ConditionTimers::default();
+        for _ in 0..45 {
+            t = tick(&mut pair(2.0, 0.0, (1, 2), (1, 2)), &mut tracker);
+        }
+        assert!(t.near_behind < 3.0, "45 ticks: {}", t.near_behind);
+        assert!((t.near_behind - 2.997).abs() < 1e-6, "{}", t.near_behind);
+        t = tick(&mut pair(2.0, 0.0, (1, 2), (1, 2)), &mut tracker);
+        assert!(t.near_behind >= 3.0, "46 ticks: {}", t.near_behind);
+        assert!((t.near_behind - 3.0636).abs() < 1e-6, "{}", t.near_behind);
     }
 
     #[test]
@@ -1230,12 +1251,12 @@ mod tests {
         };
         let (no_order_up, overtaken) = held(2.0);
         assert!(
-            (no_order_up - 2.0).abs() < 1e-9,
-            "30 frames = 2 s, got {no_order_up}"
+            (no_order_up - 30.0 * DT).abs() < 1e-9,
+            "30 ticks = 1.998 s, got {no_order_up}"
         );
         assert!(
-            (overtaken - 2.0).abs() < 1e-9,
-            "30 frames = 2 s, got {overtaken}"
+            (overtaken - 30.0 * DT).abs() < 1e-9,
+            "30 ticks = 1.998 s, got {overtaken}"
         );
         assert_eq!(held(3.0), (0.0, 0.0));
     }
@@ -1295,7 +1316,7 @@ mod tests {
         let runners: Vec<Runner> = (1..=12_u32)
             .map(|id| {
                 let mut r = test_runner(id, Strategy::PaceChaser);
-                r.accumulate_time.t = 6.0;
+                r.accumulate_time = RaceClock::after_ticks(90, DT); // 5.994 s
                 r
             })
             .collect();
@@ -1331,12 +1352,14 @@ mod tests {
         use crate::runner::test_support::test_runner;
         use crate::skills::condition::dynamic::order_rate_band_index;
 
-        // One tick past the grace, runner k in place k of n.
+        // The first tick past the grace (tick 76, 5.0616 s), runner k in
+        // place k of n.
         let latched = |n: u32| {
             let runners: Vec<Runner> = (1..=n)
                 .map(|id| {
                     let mut r = test_runner(id, Strategy::PaceChaser);
-                    r.accumulate_time.t = ORDER_CONTINUE_GRACE_SECONDS + DT;
+                    r.accumulate_time = RaceClock::after_ticks(76, DT);
+                    assert!(r.accumulate_time.seconds() > ORDER_CONTINUE_GRACE_SECONDS);
                     r
                 })
                 .collect();

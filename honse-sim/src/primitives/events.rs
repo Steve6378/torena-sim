@@ -66,9 +66,19 @@ pub trait RaceObservation {
     fn seed(&self) -> u64 {
         0
     }
-    /// Elapsed race time in seconds (drives event-log tick numbering).
+    /// Elapsed race time in seconds.
     fn accumulated_time(&self) -> f64 {
         0.0
+    }
+    /// Ticks since the gate (drives replay frame and event-log tick
+    /// numbering). The default rounds
+    /// [`accumulated_time`](Self::accumulated_time) to whole ticks of
+    /// [`FRAME_DT`](crate::runner::FRAME_DT), for doubles that only keep a
+    /// time; the race aggregates count their clock's steps.
+    fn elapsed_ticks(&self) -> u32 {
+        (self.accumulated_time() / crate::runner::FRAME_DT)
+            .round()
+            .max(0.0) as u32
     }
     /// Widest lateral offset a runner can reach, in meters (the outer rail).
     fn max_lane_distance(&self) -> f64 {

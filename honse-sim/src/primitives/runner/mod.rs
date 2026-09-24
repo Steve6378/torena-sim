@@ -26,7 +26,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::shared_kernel::ids::{RunnerId, SkillId};
 use crate::shared_kernel::language::{DistanceType, Mood, Phase, Strategy};
-use crate::shared_kernel::math::Timer;
+use crate::shared_kernel::math::{RaceClock, Timer};
 use crate::shared_kernel::params::StatLine;
 use crate::shared_kernel::rng::Prng;
 use crate::skills::condition::approximate::ApproximateCondition;
@@ -40,9 +40,21 @@ use self::lifecycle::RunnerAptitudes;
 use self::physics::{Hill, SpeedModifiers};
 use self::stats::RunnerStats;
 
-/// One tick of the race clock, in seconds (15 a second). Both engines step
-/// every runner by it, and a skill's cooldown counts whole ticks of it.
-pub const FRAME_DT: f64 = 1.0 / 15.0;
+/// The game's tick, in seconds, as the game holds it (a float32): "The races
+/// are simulated at 0.0666s per tick (about 15 frames per second)"
+/// (mechanics § Frame Rate). The recordings step both the clock and the
+/// motion by it: every recorded frame and skill event time is a float32 sum
+/// of it (see [`RaceClock`]), and distance over speed between per-tick
+/// frames at constant speed is 0.0666123 s (median of 20,074 pairs; none
+/// within 2e-5 of 1/15 s).
+pub const TICK_SECONDS: f32 = 0.0666;
+
+/// One tick, in seconds: [`TICK_SECONDS`] widened to f64
+/// (0.066600002348423). Both engines step every runner by it, motion in f64,
+/// the race clock in float32, and a skill's cooldown counts whole ticks of
+/// it. Rules the mechanics doc states in seconds convert through it; rules
+/// it states per frame keep their count.
+pub const FRAME_DT: f64 = TICK_SECONDS as f64;
 
 /// A `[start, end)` region used by scripted forced-state overrides.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -223,10 +235,11 @@ pub struct Runner {
 
     // --- timers / phase ---
     /// The runner's race clock, 0 at the gate like the race's own (finish
-    /// times, replay frames). `accumulatetime`, the `*_continue` 5 s grace,
-    /// skill cooldowns and the downhill / Conserve Power frame cadence read
-    /// it; the telemetry's `time[]` reports it.
-    pub accumulate_time: Timer,
+    /// times, replay frames), a float32 sum of the tick as the game's is.
+    /// `accumulatetime`, the `*_continue` 5 s grace, skill cooldowns and the
+    /// downhill / Conserve Power once-a-second cadences read it; the
+    /// telemetry's `time[]` reports it.
+    pub accumulate_time: RaceClock,
     /// Approximate-condition cadence timer (ticks once per second).
     pub condition_timer: Timer,
     /// Current race phase.

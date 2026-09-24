@@ -28,8 +28,6 @@ use uma_sim_primitives::events::{RaceObservation, RaceObserver, RunnerObservatio
 use uma_sim_primitives::shared_kernel::ids::{RunnerId, SkillId};
 use uma_sim_primitives::shared_kernel::language::Strategy;
 
-/// Ticks per simulated second; matches the aggregate frame rate.
-const TICKS_PER_SECOND: f64 = 15.0;
 /// Displayed race time is the raw time scaled (`docs/mechanics/README.md`,
 /// "DisplayedTime = ActualTime * 1.18").
 const DISPLAY_TIME_SCALE: f64 = 1.18;
@@ -177,12 +175,11 @@ struct ReplayInner {
 }
 
 impl ReplayInner {
-    /// Frame index for the current race time. Frame 0 is the gate, so the
-    /// first tick lands in frame 1, as in the game's own capture.
+    /// Frame index for the current race time: the race's tick. Frame 0 is
+    /// the gate, so the first tick lands in frame 1, as in the game's own
+    /// capture.
     fn tick_of(&self, race: &dyn RaceObservation) -> usize {
-        (race.accumulated_time() * TICKS_PER_SECOND)
-            .round()
-            .max(0.0) as usize
+        race.elapsed_ticks() as usize
     }
 
     /// Record `runner`'s state into the frame for `race`'s current time and
@@ -468,6 +465,7 @@ fn base_style(running_style: i64) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uma_sim_primitives::runner::FRAME_DT;
     use uma_sim_primitives::shared_kernel::ids::RunnerId;
 
     struct TestRace {
@@ -568,7 +566,7 @@ mod tests {
     fn tick(obs: &mut Box<dyn RaceObserver>, time: f64, runners: &[TestRunner]) {
         let race = TestRace { time };
         for r in runners {
-            obs.on_after_runner_tick(&race, r, 1.0 / TICKS_PER_SECOND);
+            obs.on_after_runner_tick(&race, r, FRAME_DT);
         }
     }
 
@@ -587,8 +585,8 @@ mod tests {
         a.hp = 1180.4;
         a.blocker = Some(1);
         let b = runner(1, 12.0);
-        tick(&mut obs, 1.0 / 15.0, &[a, b]);
-        obs.on_round_end(&TestRace { time: 1.0 / 15.0 });
+        tick(&mut obs, FRAME_DT, &[a, b]);
+        obs.on_round_end(&TestRace { time: FRAME_DT });
 
         let replay = &collector.result()[0];
         // Frame 0 is the gate; the first tick lands in frame 1.
@@ -615,8 +613,8 @@ mod tests {
         a.speed = 3.0;
         obs.on_runner_prepared(&start, &a);
         obs.on_runner_prepared(&start, &runner(1, 0.0));
-        tick(&mut obs, 1.0 / 15.0, &[runner(0, 1.0), runner(1, 1.0)]);
-        obs.on_round_end(&TestRace { time: 1.0 / 15.0 });
+        tick(&mut obs, FRAME_DT, &[runner(0, 1.0), runner(1, 1.0)]);
+        obs.on_round_end(&TestRace { time: FRAME_DT });
 
         let replay = &collector.result()[0];
         assert_eq!(replay.frames.len(), 2);
@@ -632,21 +630,19 @@ mod tests {
         let mut obs = collector.handle();
         obs.on_round_start(&TestRace { time: 0.0 }, 1);
 
-        tick(
-            &mut obs,
-            1.0 / 15.0,
-            &[runner(0, 1600.0), runner(1, 1590.0)],
-        );
+        tick(&mut obs, FRAME_DT, &[runner(0, 1600.0), runner(1, 1590.0)]);
         obs.on_runner_finished(
-            &TestRace { time: 1.0 / 15.0 },
+            &TestRace { time: FRAME_DT },
             &TestRunner {
                 finish_time: 74.0,
                 ..runner(0, 1600.0)
             },
         );
         // Gate 0 no longer ticks.
-        tick(&mut obs, 2.0 / 15.0, &[runner(1, 1600.0)]);
-        obs.on_round_end(&TestRace { time: 2.0 / 15.0 });
+        tick(&mut obs, 2.0 * FRAME_DT, &[runner(1, 1600.0)]);
+        obs.on_round_end(&TestRace {
+            time: 2.0 * FRAME_DT,
+        });
 
         let replay = &collector.result()[0];
         assert_eq!(replay.frames.len(), 3);
@@ -669,7 +665,7 @@ mod tests {
         slow.guts = 800;
         slow.wit = 700;
         slow.style = Strategy::EndCloser as i64;
-        tick(&mut obs, 1.0 / 15.0, &[fast, slow]);
+        tick(&mut obs, FRAME_DT, &[fast, slow]);
 
         let race = TestRace { time: 75.0 };
         obs.on_runner_finished(
@@ -715,14 +711,16 @@ mod tests {
         let mut obs = collector.handle();
         obs.on_round_start(&TestRace { time: 0.0 }, 1);
 
-        tick(&mut obs, 1.0 / 15.0, &[runner(0, 1000.0)]);
+        tick(&mut obs, FRAME_DT, &[runner(0, 1000.0)]);
         let mut spurting = runner(0, 1068.3);
         spurting.last_spurt = true;
-        tick(&mut obs, 2.0 / 15.0, &[spurting]);
+        tick(&mut obs, 2.0 * FRAME_DT, &[spurting]);
         let mut later = runner(0, 1200.0);
         later.last_spurt = true;
-        tick(&mut obs, 3.0 / 15.0, &[later]);
-        obs.on_round_end(&TestRace { time: 3.0 / 15.0 });
+        tick(&mut obs, 3.0 * FRAME_DT, &[later]);
+        obs.on_round_end(&TestRace {
+            time: 3.0 * FRAME_DT,
+        });
 
         let replay = &collector.result()[0];
         assert!((replay.results[0].last_spurt_start_distance - 1068.3).abs() < 1e-3);
@@ -733,8 +731,8 @@ mod tests {
         let collector = RaceReplayCollector::new();
         let mut obs = collector.handle();
         obs.on_round_start(&TestRace { time: 0.0 }, 1);
-        tick(&mut obs, 1.0 / 15.0, &[runner(0, 10.0)]);
-        obs.on_round_end(&TestRace { time: 1.0 / 15.0 });
+        tick(&mut obs, FRAME_DT, &[runner(0, 10.0)]);
+        obs.on_round_end(&TestRace { time: FRAME_DT });
 
         assert_eq!(
             collector.result()[0].results[0].last_spurt_start_distance,
@@ -752,18 +750,20 @@ mod tests {
         r.used = vec!["200331".to_owned(), "not-a-game-id".to_owned()];
         obs.on_debuff_routed(RunnerId(2), RunnerId(0), &SkillId::new("200331"));
         obs.on_debuff_routed(RunnerId(2), RunnerId(4), &SkillId::new("200331"));
-        tick(&mut obs, 1.0 / 15.0, &[r]);
+        tick(&mut obs, FRAME_DT, &[r]);
         // The same skill is still in `used` next tick; it must not repeat.
         let mut again = runner(2, 20.0);
         again.used = vec!["200331".to_owned()];
-        tick(&mut obs, 2.0 / 15.0, &[again]);
-        obs.on_round_end(&TestRace { time: 2.0 / 15.0 });
+        tick(&mut obs, 2.0 * FRAME_DT, &[again]);
+        obs.on_round_end(&TestRace {
+            time: 2.0 * FRAME_DT,
+        });
 
         let events = &collector.result()[0].events;
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].kind, EVENT_SKILL);
         assert_eq!(events[0].params, vec![2, 200_331, -1, 0, 0b1_0001, 0]);
-        assert!((events[0].frame_time - 1.0 / 15.0).abs() < 1e-6);
+        assert_eq!(events[0].frame_time, FRAME_DT as f32);
     }
 
     /// A calm runner carries no mode, whatever the override last left behind.
@@ -873,8 +873,8 @@ mod tests {
             style: Strategy::FrontRunner as i64,
             ..TestRunner::default()
         };
-        tick(&mut obs, 1.0 / 15.0, &[boost, nige, senko, calm]);
-        obs.on_round_end(&TestRace { time: 1.0 / 15.0 });
+        tick(&mut obs, FRAME_DT, &[boost, nige, senko, calm]);
+        obs.on_round_end(&TestRace { time: FRAME_DT });
 
         let rounds = collector.result();
         let frame = &rounds[0].frames[1];
@@ -890,14 +890,14 @@ mod tests {
         obs.on_round_start(&TestRace { time: 0.0 }, 1);
         let mut r = runner(0, 10.0);
         r.used = vec!["200331".to_owned()];
-        tick(&mut obs, 1.0 / 15.0, &[r]);
-        obs.on_round_end(&TestRace { time: 1.0 / 15.0 });
+        tick(&mut obs, FRAME_DT, &[r]);
+        obs.on_round_end(&TestRace { time: FRAME_DT });
 
         obs.on_round_start(&TestRace { time: 0.0 }, 2);
         let mut r = runner(0, 10.0);
         r.used = vec!["200331".to_owned()];
-        tick(&mut obs, 1.0 / 15.0, &[r]);
-        obs.on_round_end(&TestRace { time: 1.0 / 15.0 });
+        tick(&mut obs, FRAME_DT, &[r]);
+        obs.on_round_end(&TestRace { time: FRAME_DT });
 
         let rounds = collector.result();
         assert_eq!(rounds.len(), 2);

@@ -21,7 +21,7 @@ use crate::position_keep::initialize_position_keep;
 use crate::runner::{ForcedRank, ForcedRegion, InjectedDebuff, Runner};
 use crate::shared_kernel::ids::RunnerId;
 use crate::shared_kernel::language::{Aptitude, GroundCondition, Mood, Phase, Strategy};
-use crate::shared_kernel::math::Timer;
+use crate::shared_kernel::math::{RaceClock, Timer};
 use crate::shared_kernel::params::{RaceParameters, StatLine};
 use crate::shared_kernel::region::RegionList;
 use crate::shared_kernel::rng::{Prng, Xoshiro256StarStar};
@@ -233,7 +233,7 @@ impl Runner {
             // none of the 2093 firings of the 24 skills that read it comes
             // before N s of the race, and 13 of the 16 with 14 or more
             // firings first fire on the first tick past it (5.06 s, 10.06 s).
-            accumulate_time: Timer::new(0.0),
+            accumulate_time: RaceClock::new(),
             condition_timer: Timer::new(-1.0),
             phase: Phase::EarlyRace,
             next_phase_transition: 0.0,
@@ -379,7 +379,7 @@ impl Runner {
         self.adjusted_stats = self.pristine_adjusted_stats;
         self.first_position_in_late_race = false;
         self.finish_time = 0.0;
-        self.accumulate_time = Timer::new(0.0);
+        self.accumulate_time = RaceClock::new();
         self.condition_timer = Timer::new(-1.0);
         self.conditions.clear();
         self.condition_values.clear();

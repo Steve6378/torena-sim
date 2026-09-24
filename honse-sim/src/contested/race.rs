@@ -29,6 +29,7 @@ use uma_sim_primitives::runner::skills::FieldView;
 use uma_sim_primitives::runner::Runner;
 use uma_sim_primitives::shared_kernel::ids::RunnerId;
 use uma_sim_primitives::shared_kernel::language::{strategy_matches, GroundCondition, Strategy};
+use uma_sim_primitives::shared_kernel::math::RaceClock;
 use uma_sim_primitives::shared_kernel::params::RaceParameters;
 use uma_sim_primitives::shared_kernel::region::{Region, RegionList};
 use uma_sim_primitives::shared_kernel::rng::{Prng, Xoshiro256StarStar};
@@ -134,8 +135,9 @@ pub struct Race {
     whole_course: RegionList,
     /// Round index (selects which sampled trigger fires).
     round_iteration: usize,
-    /// Elapsed race time in seconds.
-    accumulated_time: f64,
+    /// The race clock: 0 at the gate, one float32 tick a step, as the
+    /// game's (finish times, replay frames and events, telemetry).
+    clock: RaceClock,
     /// Master seed of the current round.
     seed: u64,
     /// The race RNG (drives gate assignment + per-runner sub-streams).
@@ -178,7 +180,10 @@ impl RaceObservation for Race {
         self.seed
     }
     fn accumulated_time(&self) -> f64 {
-        self.accumulated_time
+        self.clock.seconds()
+    }
+    fn elapsed_ticks(&self) -> u32 {
+        self.clock.ticks()
     }
     fn max_lane_distance(&self) -> f64 {
         self.course.max_lane_distance
@@ -212,7 +217,7 @@ impl Race {
             catalog: build_catalog_for(CONDITION_RESOLUTION),
             whole_course,
             round_iteration: 0,
-            accumulated_time: 0.0,
+            clock: RaceClock::new(),
             seed: 0,
             rng: Box::new(Xoshiro256StarStar::from_u64_seed(0)),
             order_tracker: FieldOrderTracker::new(),
@@ -269,7 +274,7 @@ impl Race {
     /// Prepare the field for a round: count field composition, assign gates,
     /// spawn per-runner RNGs + stamina policies, and reset every runner.
     pub fn prepare_round(&mut self, master_seed: u64) {
-        self.accumulated_time = 0.0;
+        self.clock = RaceClock::new();
         self.finished_runners.clear();
         self.finish_marks.clear();
         self.order_tracker.reset();
@@ -386,14 +391,14 @@ impl Race {
     /// Advance the whole field one `dt`-second step (snapshot-based).
     pub fn on_update(&mut self, dt: f64) {
         self.emit_before_tick(dt);
-        self.accumulated_time += dt;
+        self.clock.advance(dt);
 
         let mut snapshot = build_field_snapshot(
             &self.runners,
             &self.finished_runners,
             &mut self.order_tracker,
         );
-        if let Some(ahead) = finished_leader_position(&self.finish_marks, self.accumulated_time) {
+        if let Some(ahead) = finished_leader_position(&self.finish_marks, self.clock.seconds()) {
             snapshot.leader_position = Some(
                 snapshot
                     .leader_position
@@ -456,7 +461,7 @@ impl Race {
             );
             let ctx = UpdateContext {
                 base_speed,
-                accumulated_time: self.accumulated_time,
+                accumulated_time: self.clock.seconds(),
                 course: &self.course,
             };
             runner.on_update(dt, &field_inputs, &ctx);
@@ -564,11 +569,16 @@ impl Race {
         const MAX_DISTANCE_GAP: f64 = 3.0;
         const MAX_SPEED_GAP: f64 = 0.6;
         /// `TargetContinueTime`: a target must stay in the box for more than
-        /// 2 s, that is more than 30 whole ticks of [`FRAME_DT`] (1/15 s).
-        /// Counted in ticks, not summed in seconds: 30 ticks of 1/15 s sum to
-        /// 1.9999999999999998 in f64, so a comparison in seconds would settle
-        /// the boundary by rounding error.
-        const TARGET_CONTINUE_TICKS: u32 = 30;
+        /// 2 s (mechanics § Dueling), a rule in seconds.
+        const TARGET_CONTINUE_SECONDS: f64 = 2.0;
+        /// The same rule in whole ticks of [`FRAME_DT`]: a window of `w`
+        /// ticks has run more than 2 s once `w` passes 2 s / tick, 30.03 on
+        /// the game's 0.0666 s tick (30 ticks are 1.998 s, 31 are 2.065 s),
+        /// so `w > 30` as it was on a 1/15 s tick. Counted in ticks, not
+        /// summed in seconds: on a 1/15 s tick 30 ticks summed to
+        /// 1.9999999999999998 in f64, and a comparison in seconds settled the
+        /// boundary by rounding error.
+        const TARGET_CONTINUE_TICKS: u32 = (TARGET_CONTINUE_SECONDS / FRAME_DT) as u32;
         /// `TargetContinueDistance`: exit once separated by >=5m (either
         /// direction) from every current-or-former duel participant.
         const EXIT_DISTANCE_GAP: f64 = 5.0;
@@ -639,7 +649,7 @@ impl Race {
         // each (initiator, target) pair has its own, opened at 0 on the first
         // tick the pair is in the box, advanced by one tick while it stays
         // there, and dropped on the tick it leaves. It elapses on the 31st
-        // tick after the first (2.067 s), the first tick past 2 s. Swapping
+        // tick after the first (2.065 s), the first tick past 2 s. Swapping
         // partners restarts the count; 2 s beside SOME uma is not enough.
         // (The runner's own `can_duel` / `dueling_timer` belong to the vacuum
         // engine's artificial dueling and are not read here.)
@@ -907,7 +917,7 @@ impl Race {
             self.finished_runners.push(id);
             if let Some(runner) = self.runners.iter().find(|r| r.id == id) {
                 self.finish_marks.push((
-                    self.accumulated_time,
+                    self.clock.seconds(),
                     runner.position,
                     runner.current_speed,
                 ));
@@ -1150,64 +1160,184 @@ mod tests {
 
     /// Every runner's clock is the race's: 0 at the gate, the clock the
     /// finish times and the replay frames are on. The port started the
-    /// runners' at -1 s.
+    /// runners' at -1 s. Both are the game's clock, the float32 sum of the
+    /// float32 0.0666 s tick, bit for bit: ticks 1 and 1426 read
+    /// 0.066600002348423 and 94.97074890136719 s, as 10104-r0006's frames
+    /// do. On a 1/15 s tick they read 0.0667 and 95.07 s.
     #[test]
     fn every_runner_reads_the_race_clock() {
         let mut race = race_with(3);
         race.prepare_round(7);
-        for _ in 0..200 {
+        let mut game = 0.0_f32;
+        for tick in 1..=1500_u32 {
             race.on_update(FRAME_DT);
-            for r in &race.runners {
-                let (runner, race) = (r.accumulate_time.t, race.accumulated_time);
-                assert!((runner - race).abs() < 1e-9, "runner {runner}, race {race}");
+            game += 0.0666_f32;
+            assert_eq!(race.elapsed_ticks(), tick);
+            assert_eq!(
+                race.accumulated_time().to_bits(),
+                f64::from(game).to_bits(),
+                "tick {tick}"
+            );
+            for r in race.runners.iter().filter(|r| !r.finished) {
+                let (runner, race) = (r.accumulate_time.seconds(), race.accumulated_time());
+                assert_eq!(
+                    runner.to_bits(),
+                    race.to_bits(),
+                    "runner {runner}, race {race}"
+                );
+            }
+            if tick == 1 {
+                assert_eq!(race.accumulated_time(), 0.066600002348423);
+            }
+            if tick == 1426 {
+                assert_eq!(race.accumulated_time(), 94.97074890136719);
             }
         }
     }
 
-    /// `accumulatetime>=5` opens on the first tick at or after 5 s of the
-    /// race, as on the recordings (5.06 s, the first game tick past 5 s).
+    /// The replay's frame index and the event log's tick are the race's tick
+    /// count. round(t x 15) of the clock, which both read before the game's
+    /// tick, first parts from it on tick 503 (33.49998 s, x 15 = 502.4998).
+    /// Run to the line on the 2400 m test course, well past tick 1426: frame
+    /// n holds the clock after n ticks (frame 1426 reads 94.97074890136719 s,
+    /// as 10104-r0006's recorded frame at that tick does), and each logged
+    /// event carries the race's elapsed ticks - 1 of the tick it happened on.
     #[test]
-    fn accumulatetime_opens_at_its_second_of_the_race() {
+    fn replay_frames_and_logged_events_count_the_race_ticks() {
+        use crate::contested::collectors::RaceEventLogCollector;
+        use crate::contested::replay::RaceReplayCollector;
+        use uma_sim_primitives::events::RunnerObservation;
+
+        type Seen = Rc<RefCell<HashMap<(RunnerId, u64), Vec<u32>>>>;
+        /// The race's elapsed ticks whenever a runner is observed, keyed by
+        /// the runner and the position the event log records.
+        struct TickProbe(Seen);
+        impl TickProbe {
+            fn note(&self, race: &dyn RaceObservation, runner: &dyn RunnerObservation) {
+                let position = runner.position().min(race.course_distance());
+                self.0
+                    .borrow_mut()
+                    .entry((runner.id(), position.to_bits()))
+                    .or_default()
+                    .push(race.elapsed_ticks());
+            }
+        }
+        impl RaceObserver for TickProbe {
+            fn on_after_runner_tick(
+                &mut self,
+                race: &dyn RaceObservation,
+                runner: &dyn RunnerObservation,
+                _dt: f64,
+            ) {
+                self.note(race, runner);
+            }
+            fn on_runner_finished(
+                &mut self,
+                race: &dyn RaceObservation,
+                runner: &dyn RunnerObservation,
+            ) {
+                self.note(race, runner);
+            }
+        }
+
+        let replay = RaceReplayCollector::new();
+        let log = RaceEventLogCollector::new();
+        let seen: Seen = Rc::default();
+        let mut race = race_with(3);
+        race.subscribe(replay.handle());
+        race.subscribe(log.handle());
+        race.subscribe(Box::new(TickProbe(Rc::clone(&seen))));
+        race.prepare_round(7);
+        race.run();
+        let ticks = race.elapsed_ticks();
+        assert!(ticks > 1426, "{ticks} ticks");
+
+        let replays = replay.result();
+        let frames = &replays[0].frames;
+        assert_eq!(
+            frames.len(),
+            ticks as usize + 1,
+            "the gate's frame and one a tick"
+        );
+        let mut clock = 0.0_f32;
+        for (n, frame) in frames.iter().enumerate() {
+            assert_eq!(frame.time.to_bits(), clock.to_bits(), "frame {n}");
+            clock += 0.0666_f32;
+        }
+        assert_eq!(f64::from(frames[1426].time), 94.97074890136719);
+
+        let logs = log.result();
+        let seen = seen.borrow();
+        let mut past_503 = 0;
+        for event in &logs[0] {
+            let at = seen
+                .get(&(event.runner_id, event.position.to_bits()))
+                .expect("the event's runner was observed there");
+            assert!(
+                at.iter().any(|&n| i64::from(n) - 1 == event.tick),
+                "{event:?}: elapsed ticks there {at:?}"
+            );
+            if event.tick >= 503 {
+                past_503 += 1;
+            }
+        }
+        assert!(past_503 > 0, "no event past tick 503");
+    }
+
+    /// `accumulatetime>=N` opens on the first tick whose clock reads N s or
+    /// more, as on the recordings. Of the carriers' first firings of the
+    /// skills that name `accumulatetime>=5`, 376 of 999 are on tick 76
+    /// (5.0616 s; tick 75 reads 4.995 s) and none earlier; of those naming
+    /// `accumulatetime>=10`, 25 of 1,094 are on tick 151 (10.0566 s; tick 150
+    /// reads 9.990 s) and none earlier. On a 1/15 s tick they opened on tick
+    /// 75 (5.000000000000002 s) and on tick 151 at 10.06666666666665 s.
+    #[test]
+    fn accumulatetime_opens_on_the_recorded_tick() {
         use uma_sim_primitives::shared_kernel::ids::SkillId;
         use uma_sim_primitives::skills::effect::{SkillRarity, SkillTarget};
         use uma_sim_primitives::skills::model::{RawSkillEffect, Skill, SkillAlternative};
-        let mut carrier = props("carrier", Strategy::PaceChaser);
-        carrier.skills = vec![Skill {
-            skill_id: SkillId::new("100011"),
-            rarity: SkillRarity::Unique, // no wit roll
-            tags: vec![],
-            alternatives: vec![SkillAlternative {
-                base_duration: 30000.0,
-                cooldown_time: None,
-                duration_scaling: None,
-                condition: "accumulatetime>=5".to_owned(),
-                precondition: None,
-                effects: vec![RawSkillEffect {
-                    modifier: 1500.0,
-                    target: SkillTarget::SelfTarget,
-                    effect_type: 27, // TargetSpeed
-                    value_usage: None,
-                    value_level_usage: None,
-                    pre_applied_multiplier: None,
-                    additional_activate_type: None,
+        for (condition, tick, clock) in [
+            ("accumulatetime>=5", 76, 5.0615997314453125),
+            ("accumulatetime>=10", 151, 10.056588172912598),
+        ] {
+            let mut carrier = props("carrier", Strategy::PaceChaser);
+            carrier.skills = vec![Skill {
+                skill_id: SkillId::new("100011"),
+                rarity: SkillRarity::Unique, // no wit roll
+                tags: vec![],
+                alternatives: vec![SkillAlternative {
+                    base_duration: 30000.0,
+                    cooldown_time: None,
+                    duration_scaling: None,
+                    condition: condition.to_owned(),
+                    precondition: None,
+                    effects: vec![RawSkillEffect {
+                        modifier: 1500.0,
+                        target: SkillTarget::SelfTarget,
+                        effect_type: 27, // TargetSpeed
+                        value_usage: None,
+                        value_level_usage: None,
+                        pre_applied_multiplier: None,
+                        additional_activate_type: None,
+                    }],
                 }],
-            }],
-        }];
-        let mut race = Race::new(
-            test_course(),
-            GroundCondition::Firm,
-            SimulationSettings::default(),
-            test_race_params(),
-        );
-        race.add_runner(carrier);
-        race.add_runner(props("rival", Strategy::LateSurger));
-        race.prepare_round(7);
-        while race.runners[0].skills_activated_count == 0 {
-            assert!(race.accumulated_time < 10.0, "never fired");
-            race.on_update(FRAME_DT);
+            }];
+            let mut race = Race::new(
+                test_course(),
+                GroundCondition::Firm,
+                SimulationSettings::default(),
+                test_race_params(),
+            );
+            race.add_runner(carrier);
+            race.add_runner(props("rival", Strategy::LateSurger));
+            race.prepare_round(7);
+            while race.runners[0].skills_activated_count == 0 {
+                assert!(race.elapsed_ticks() < 300, "{condition}: never fired");
+                race.on_update(FRAME_DT);
+            }
+            assert_eq!(race.elapsed_ticks(), tick, "{condition}");
+            assert_eq!(race.accumulated_time(), clock, "{condition}");
         }
-        let t = race.accumulated_time;
-        assert!((5.0 - 1e-9..5.0 + FRAME_DT).contains(&t), "fired at {t} s");
     }
 
     #[test]
@@ -1720,7 +1850,7 @@ mod tests {
         }
         assert_eq!(race.duel_windows.len(), 4);
 
-        // 30 ticks later every pair has been in the box for exactly 2 s, not
+        // 30 ticks later every pair has been in the box for 1.998 s, not
         // MORE than 2 s: nobody duels yet.
         duel_ticks(&mut race, 30);
         for pair in pairs {
@@ -1728,7 +1858,7 @@ mod tests {
         }
         assert!(race.runners.iter().all(|r| !r.is_dueling));
 
-        // Tick 31 (2.067 s), the first past 2 s: the top-half pair starts
+        // Tick 31 (2.065 s), the first past 2 s: the top-half pair starts
         // dueling...
         duel_ticks(&mut race, 1);
         assert!(race.runners[0].is_dueling);
@@ -1981,7 +2111,7 @@ mod tests {
         race.runners[1].position = 2101.0;
         race.runners[2].position = 2150.0;
         duel_ticks(&mut race, 1 + 25);
-        // ...then 1 drops away and 2 comes alongside for 30 ticks (2 s): 0
+        // ...then 1 drops away and 2 comes alongside for 30 ticks (1.998 s): 0
         // has been beside some uma for 56 ticks (3.7 s), but never more than
         // 2 s beside the same one, so no duel.
         race.runners[1].position = 2150.0;
@@ -2044,7 +2174,7 @@ mod tests {
         assert_eq!(race.duel_windows.get(&(RunnerId(2), RunnerId(1))), Some(&8));
         assert!(!race.runners[2].is_dueling);
 
-        // 22 ticks on, 1's own window has run exactly 2 s: still no duel.
+        // 22 ticks on, 1's own window has run 30 ticks, 1.998 s: still no duel.
         duel_ticks(&mut race, 22);
         assert!(!race.runners[2].is_dueling);
         // Tick 31, past 2 s: 2 duels with 1 as the target.

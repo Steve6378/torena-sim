@@ -29,6 +29,7 @@ use uma_sim_primitives::runner::skills::FieldView;
 use uma_sim_primitives::runner::Runner;
 use uma_sim_primitives::shared_kernel::ids::RunnerId;
 use uma_sim_primitives::shared_kernel::language::{strategy_matches, GroundCondition, Strategy};
+use uma_sim_primitives::shared_kernel::math::RaceClock;
 use uma_sim_primitives::shared_kernel::params::RaceParameters;
 use uma_sim_primitives::shared_kernel::region::{Region, RegionList};
 use uma_sim_primitives::shared_kernel::rng::{Prng, Xoshiro256StarStar};
@@ -132,8 +133,9 @@ pub struct Race {
     whole_course: RegionList,
     /// Round index (selects which sampled trigger fires).
     round_iteration: usize,
-    /// Elapsed race time in seconds.
-    accumulated_time: f64,
+    /// The race clock: 0 at the gate, one float32 tick a step, as the
+    /// game's (finish times, replay frames and events, telemetry).
+    clock: RaceClock,
     /// Master seed of the current round.
     seed: u64,
     /// The race RNG (drives gate assignment + per-runner sub-streams).
@@ -160,7 +162,10 @@ impl RaceObservation for Race {
         self.seed
     }
     fn accumulated_time(&self) -> f64 {
-        self.accumulated_time
+        self.clock.seconds()
+    }
+    fn elapsed_ticks(&self) -> u32 {
+        self.clock.ticks()
     }
     fn max_lane_distance(&self) -> f64 {
         self.course.max_lane_distance
@@ -195,7 +200,7 @@ impl Race {
             catalog: build_catalog_for(CONDITION_RESOLUTION),
             whole_course,
             round_iteration: 0,
-            accumulated_time: 0.0,
+            clock: RaceClock::new(),
             seed: 0,
             rng: Box::new(Xoshiro256StarStar::from_u64_seed(0)),
             order_tracker: FieldOrderTracker::new(),
@@ -247,7 +252,7 @@ impl Race {
     /// Prepare the field for a round: count field composition, assign gates,
     /// spawn per-runner RNGs + stamina policies, and reset every runner.
     pub fn prepare_round(&mut self, master_seed: u64) {
-        self.accumulated_time = 0.0;
+        self.clock = RaceClock::new();
         self.finished_runners.clear();
         self.order_tracker.reset();
 
@@ -355,7 +360,7 @@ impl Race {
     /// Advance the whole field one `dt`-second step (snapshot-based).
     pub fn on_update(&mut self, dt: f64) {
         self.emit_before_tick(dt);
-        self.accumulated_time += dt;
+        self.clock.advance(dt);
 
         let snapshot = build_field_snapshot(
             &self.runners,
@@ -404,7 +409,7 @@ impl Race {
                 resolve_field_inputs(runner, &field, self.dueling_rates, position_keep);
             let ctx = UpdateContext {
                 base_speed,
-                accumulated_time: self.accumulated_time,
+                accumulated_time: self.clock.seconds(),
                 course: &self.course,
             };
             runner.on_update(dt, &field_inputs, &ctx);

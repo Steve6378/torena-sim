@@ -15,7 +15,7 @@ impl RunnerObservation for Runner {
         self.id
     }
     fn accumulate_time(&self) -> f64 {
-        self.accumulate_time.t
+        self.accumulate_time.seconds()
     }
     fn position(&self) -> f64 {
         self.position

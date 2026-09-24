@@ -22,8 +22,6 @@ use uma_sim_primitives::projection::{close_all, count_effects, reconcile_effects
 pub use uma_sim_primitives::projection::{EffectPerspective, SkillEffectLog};
 use uma_sim_primitives::shared_kernel::ids::RunnerId;
 
-/// Ticks per simulated second (15 FPS); matches the aggregate frame rate.
-const TICKS_PER_SECOND: f64 = 15.0;
 /// Duration-based effect types (tracked as position ranges, not point events).
 const ACTIVE_EFFECT_TYPES: [i32; 6] = [21, 22, 27, 28, 31, 35];
 /// Position-keep discriminants the event log watches (mirror `PositionKeepState`).
@@ -439,7 +437,7 @@ struct EventLogObserver {
 
 impl EventLogInner {
     fn current_tick(&self, race: &dyn RaceObservation) -> i64 {
-        let one_based = (race.accumulated_time() * TICKS_PER_SECOND).round() as i64;
+        let one_based = i64::from(race.elapsed_ticks());
         (one_based - 1).max(0)
     }
 
@@ -873,7 +871,8 @@ mod tests {
                 RaceLogEventKind::Finished,
             ]
         );
-        // Tick numbering: round(1.0*15)-1 = 14.
+        // Tick numbering: 1.0 s is 15 whole ticks (15.02 of 0.0666 s), 0-based
+        // 14.
         assert_eq!(events[0].tick, 14);
         // Skill detail carries the id.
         assert_eq!(

@@ -21,7 +21,7 @@ use honse_sim::shared_kernel::language::{
 use honse_sim::shared_kernel::params::{RaceParameters, StatLine};
 use honse_sim::skills::effect::PositionKeepState;
 
-const FRAME_DT: f64 = 1.0 / 15.0;
+use honse_sim::runner::FRAME_DT;
 const COURSE_DISTANCE: f64 = 2500.0;
 const SEED: u64 = 575_032;
 

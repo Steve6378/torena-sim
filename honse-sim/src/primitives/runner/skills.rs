@@ -81,7 +81,7 @@ pub struct RunnerConditionView<'a> {
 
 impl RunnerView for RunnerConditionView<'_> {
     fn accumulate_time(&self) -> f64 {
-        self.runner.accumulate_time.t
+        self.runner.accumulate_time.seconds()
     }
     fn skills_activated_count(&self) -> i64 {
         self.runner.skills_activated_count
@@ -701,7 +701,7 @@ impl Runner {
                     let duration = self.activate_skill(&skill, course_distance);
                     // The cooldown starts on the tick the effect ends, both
                     // counted in whole ticks (the recordings; see below).
-                    let ready_at = self.accumulate_time.t
+                    let ready_at = self.accumulate_time.seconds()
                         + ready_ticks(duration, skill.cooldown, FRAME_DT) * FRAME_DT;
                     // One skill, one cooldown: its other alternatives wait it
                     // out too, and without a cooldown the skill is spent.
@@ -744,11 +744,12 @@ impl Runner {
                     // recordings, and the 2.4 s corner skills (200331, 200332)
                     // at 1400 to 1800 m; no recorded repeat decides
                     // there (the one at 1700 m fired 8 ticks late, on its own
-                    // timer). On the engine's 1/15 s tick the 30 s base
-                    // cooldown is whole ticks on every course that is a
-                    // multiple of 20 m, so there this count is the elapsed tick
-                    // itself: under this form the recordings' extra tick is the
-                    // game's tick rounding.
+                    // timer). Under this form the recordings' extra tick is
+                    // the rounding of the game's 0.0666 s tick, which the
+                    // engine now steps: on a 1/15 s tick the 30 s base
+                    // cooldown was whole ticks on every course that is a
+                    // multiple of 20 m, and the count fell on the elapsed tick
+                    // itself.
                     if skill.cooldown > 0.0 {
                         let same = |p: &PendingSkill| {
                             p.skill_id == skill.skill_id
@@ -885,11 +886,14 @@ impl Runner {
     }
 
     /// Whether this tick is the one at race time `at` or later. `at` is a tick
-    /// of the runner's clock (or infinite), and the two are compared in whole
-    /// ticks of [`FRAME_DT`], so float rounding in either sum cannot move the
-    /// answer by a tick.
+    /// of the runner's clock plus whole ticks of [`FRAME_DT`] (or infinite),
+    /// and the two are compared in whole ticks, so float rounding in either
+    /// cannot move the answer by a tick. The clock's float32 sum stays within
+    /// a tenth of a tick of n x [`FRAME_DT`] through tick 5000 and rounds to
+    /// n through tick 7581 (505 s); the longest of the 117 recorded races
+    /// runs 2476 ticks (164.9 s).
     fn tick_reached(&self, at: f64) -> bool {
-        (self.accumulate_time.t / FRAME_DT).round() >= (at / FRAME_DT).round()
+        (self.accumulate_time.seconds() / FRAME_DT).round() >= (at / FRAME_DT).round()
     }
 
     /// Hold the skill's other exclusive alternatives until race time `until`
@@ -1434,8 +1438,12 @@ fn active_targeted(
 /// activate again: its effect ends on the first whole tick its `duration` has
 /// run, and the `cooldown` counts whole ticks from that one.
 fn ready_ticks(duration: f64, cooldown: f64, tick: f64) -> f64 {
-    // A span of whole ticks up to float rounding (3.0 x 2600 / 1000 s is
-    // 7.800000000000001, 117 ticks of 1/15 s) is that many ticks, not one more.
+    // A span of whole ticks up to float rounding is that many ticks, not one
+    // more: on a 1/15 s tick 3.0 x 2.6 = 7.800000000000001 s is 117 ticks,
+    // not 118. On the game's 0.0666 s tick no base duration or cooldown in the
+    // skill data, scaled to any of the game's course distances (1000 to 3600
+    // m), is that near a whole tick: the nearest, 10.4 s at 1300 m, is 203.003
+    // ticks, so there the slack decides nothing.
     let whole = |seconds: f64| (seconds / tick - 1e-9).ceil();
     whole(duration) + whole(cooldown)
 }
@@ -2359,7 +2367,7 @@ mod tests {
             .iter()
             .position(|p| p.skill_id.as_str() == "200002")
             .expect("gold pending");
-        r.pending_skills[at].ready_at = r.accumulate_time.t + 60.0;
+        r.pending_skills[at].ready_at = r.accumulate_time.seconds() + 60.0;
         fire_carrier(&mut r);
         assert!(r
             .target_speed_skills_active
@@ -2657,7 +2665,7 @@ mod tests {
         prepare(&mut r);
         r.wit_checks_enabled = false;
         activate_first(&mut r, &FieldView::at_gate());
-        let fired_at = r.accumulate_time.t;
+        let fired_at = r.accumulate_time.seconds();
         let ready = ready_ticks(7.2, 72.0, FRAME_DT);
         assert!(
             (r.pending_skills[0].ready_at - (fired_at + ready * FRAME_DT)).abs() < 1e-9,
@@ -2666,16 +2674,22 @@ mod tests {
         );
         // The condition holds throughout, as a near-lane spell still running
         // at the end of the cooldown does: it waits for the effect's 7.2 s.
-        r.accumulate_time.advance(72.5);
-        r.process_skill_activations(&FieldView::at_gate(), 2400.0);
-        assert_eq!(
-            r.skills_activated_count, 1,
-            "cooldown counted from the activation"
-        );
-        r.accumulate_time.t = fired_at + (ready - 1.0) * FRAME_DT;
+        // The clock steps a tick at a time from the activation.
+        let mut ticks = 0.0;
+        while ticks < ready - 1.0 {
+            r.accumulate_time.advance(FRAME_DT);
+            ticks += 1.0;
+            if (ticks * FRAME_DT - 72.5).abs() < FRAME_DT / 2.0 {
+                r.process_skill_activations(&FieldView::at_gate(), 2400.0);
+                assert_eq!(
+                    r.skills_activated_count, 1,
+                    "cooldown counted from the activation"
+                );
+            }
+        }
         r.process_skill_activations(&FieldView::at_gate(), 2400.0);
         assert_eq!(r.skills_activated_count, 1, "a tick short");
-        r.accumulate_time.t = fired_at + ready * FRAME_DT;
+        r.accumulate_time.advance(FRAME_DT);
         r.process_skill_activations(&FieldView::at_gate(), 2400.0);
         assert_eq!(r.skills_activated_count, 2, "the ready tick");
     }
@@ -2692,17 +2706,17 @@ mod tests {
     /// as the whole ticks they are.
     #[test]
     fn ready_ticks_count_the_effect_then_the_cooldown_in_whole_ticks() {
-        const GAME_TICK: f64 = 0.0666;
         // As the engine computes them: base x distance / 1000.
         let see_ya_later = |distance: f64, tick: f64| {
             let duration = 3.0 * (distance / 1000.0);
             let cooldown = 300000.0 / 10000.0 * distance / 1000.0;
             ready_ticks(duration, cooldown, tick)
         };
-        assert_eq!(see_ya_later(2600.0, GAME_TICK), 1290.0, "118 + 1172");
-        assert_eq!(see_ya_later(1600.0, GAME_TICK), 794.0, "73 + 721");
-        assert_eq!(see_ya_later(2000.0, GAME_TICK), 992.0, "91 + 901");
-        assert_eq!(see_ya_later(1700.0, GAME_TICK), 843.0, "77 + 766");
+        // The engine's tick, the game's 0.0666 s.
+        assert_eq!(see_ya_later(2600.0, FRAME_DT), 1290.0, "118 + 1172");
+        assert_eq!(see_ya_later(1600.0, FRAME_DT), 794.0, "73 + 721");
+        assert_eq!(see_ya_later(2000.0, FRAME_DT), 992.0, "91 + 901");
+        assert_eq!(see_ya_later(1700.0, FRAME_DT), 843.0, "77 + 766");
         assert_eq!(see_ya_later(2600.0, 1.0 / 15.0), 1287.0, "117 + 1170");
         assert_eq!(see_ya_later(1600.0, 1.0 / 15.0), 792.0, "72 + 720");
         assert_eq!(ready_ticks(0.0, 72.0, 1.0 / 15.0), 1080.0, "instant");
@@ -2745,7 +2759,7 @@ mod tests {
                 prepare_on(&mut r, distance);
                 r.wit_checks_enabled = false;
                 // The clock steps a tick at a time, as in the race.
-                while r.accumulate_time.t < 10.0 {
+                while r.accumulate_time.seconds() < 10.0 {
                     r.accumulate_time.advance(FRAME_DT);
                 }
                 for _ in 0..first {
@@ -2767,6 +2781,58 @@ mod tests {
             assert!(
                 late.is_empty(),
                 "{distance} m: ready after {ready} ticks; (ticks past 10 s, fired after) {late:?}"
+            );
+        }
+    }
+
+    /// The three recorded See Ya Later! (201662) repeats whose condition held
+    /// before their ready tick, replayed on the race clock from the gate:
+    /// fired on tick n1, re-armed into a spell that holds throughout, fired
+    /// again on the recorded tick. 10908-r0039 runner 2 (2600 m) 348 and
+    /// 1638, 10611-r0077 runner 0 (1600 m) 190 and 984, 10104-r0045 runner 2
+    /// (2000 m) 240 and 1232. With them the upper bound, 10504-r0065 runner 6
+    /// (2000 m) 386 and 1378: she fired again on her ready tick whatever her
+    /// condition did, so it comes no later. On a 1/15 s tick the same count
+    /// fired the four 3, 2, 2 and 2 ticks early (1635, 982, 1230, 1376).
+    #[test]
+    fn re_armed_skills_fire_again_on_the_recorded_ticks() {
+        use crate::shared_kernel::math::RaceClock;
+        use crate::skills::condition::dynamic::ConditionTimers;
+        let mut skill = target_speed_skill(
+            "201662",
+            SkillRarity::White,
+            "behind_near_lane_time>=3&accumulatetime>=10",
+        );
+        skill.alternatives[0].effects[0].modifier = 3500.0;
+        skill.alternatives[0].cooldown_time = Some(300000.0);
+        let spell = FieldView {
+            condition_timers: Some(ConditionTimers {
+                near_behind: 30.0,
+                ..ConditionTimers::default()
+            }),
+            ..FieldView::default()
+        };
+        for (distance, first, second) in [
+            (2600.0, 348, 1638),
+            (1600.0, 190, 984),
+            (2000.0, 240, 1232),
+            (2000.0, 386, 1378),
+        ] {
+            let mut r = runner_with_skills(vec![skill.clone()]);
+            prepare_on(&mut r, distance);
+            r.wit_checks_enabled = false;
+            r.accumulate_time = RaceClock::after_ticks(first, FRAME_DT);
+            r.position = r.pending_skills[0].trigger.start + 0.5;
+            r.process_skill_activations(&spell, distance);
+            assert_eq!(r.skills_activated_count, 1, "{distance} m: first firing");
+            while r.skills_activated_count == 1 && r.accumulate_time.ticks() < second + 5 {
+                r.accumulate_time.advance(FRAME_DT);
+                r.process_skill_activations(&spell, distance);
+            }
+            assert_eq!(
+                r.accumulate_time.ticks(),
+                second,
+                "{distance} m: second firing"
             );
         }
     }
@@ -2955,7 +3021,7 @@ mod tests {
         skill
     }
 
-    /// Run `ticks` activation passes, 1 m and 1/15 s apart, with the leader
+    /// Run `ticks` activation passes, 1 m and a tick apart, with the leader
     /// `ahead` metres in front.
     fn run_ticks(r: &mut Runner, ahead: f64, ticks: usize) {
         for _ in 0..ticks {
@@ -2965,7 +3031,7 @@ mod tests {
             };
             r.process_skill_activations(&field, 2400.0);
             r.position += 1.0;
-            r.accumulate_time.advance(1.0 / 15.0);
+            r.accumulate_time.advance(FRAME_DT);
         }
     }
 

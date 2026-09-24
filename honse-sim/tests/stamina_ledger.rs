@@ -27,7 +27,7 @@ use honse_sim::skills::effect::PositionKeepState;
 use honse_sim::stamina::game_policy::GameStaminaPolicy;
 use honse_sim::stamina::policy::{RaceStateSlice, SpeedContributions, StaminaPolicy, StaminaStats};
 
-const FRAME_DT: f64 = 1.0 / 15.0;
+use honse_sim::runner::FRAME_DT;
 const SEED: u64 = 575_032;
 
 fn race_params() -> RaceParameters {
@@ -424,12 +424,16 @@ fn recovery_books_the_clamped_delta_and_a_drain_is_not_negative_recovery() {
 }
 
 /// Captured from the engine **before** the ledger existed, by running this same
-/// race on a tree with `honse-sim/src` stashed. Bit-exact: if attribution ever
-/// perturbs the simulation, these move and this test fails.
+/// race on a tree with `honse-sim/src` stashed, and re-captured when the tick
+/// became the game's 0.0666 s (finish times are now float32 clock values).
+/// Bit-exact: if attribution ever perturbs the simulation, these move and this
+/// test fails. On the 1/15 s tick they were Front 96.73333333333296 s /
+/// 11.863822887639163 HP, Late 97.13333333333294 / -72.39326872221477, Pace
+/// 96.99999999999962 / -56.773337795749455.
 const GOLDEN: [(&str, f64, f64); 3] = [
-    ("Front", 9.673_333_333_333_296e1, 1.186_382_288_763_916_3e1),
-    ("Late", 9.713_333_333_333_294e1, -7.239_326_872_221_477e1),
-    ("Pace", 9.699_999_999_999_962e1, -5.677_333_779_574_945_5e1),
+    ("Front", 9.670_227_050_781_25e1, 1.385_918_908_121_463e1),
+    ("Late", 9.716_844_940_185_547e1, -7.357_851_146_430_278e1),
+    ("Pace", 9.696_865_844_726_563e1, -5.543_192_037_971_516_6e1),
 ];
 const GOLDEN_ORDER: [&str; 3] = ["Front", "Pace", "Late"];
 

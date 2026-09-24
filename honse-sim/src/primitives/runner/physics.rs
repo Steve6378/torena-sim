@@ -1095,7 +1095,7 @@ mod tests {
         let fi = test_field_inputs(&field);
         let start = r.position;
         for _ in 0..200 {
-            r.on_update(1.0 / 15.0, &fi, &ctx);
+            r.on_update(crate::runner::FRAME_DT, &fi, &ctx);
         }
         assert!(r.position > start);
         assert!(r.current_speed > 3.0);
@@ -1110,7 +1110,7 @@ mod tests {
         // Run until start dash ends.
         let mut released = false;
         for _ in 0..500 {
-            r.on_update(1.0 / 15.0, &fi, &ctx);
+            r.on_update(crate::runner::FRAME_DT, &fi, &ctx);
             if !r.start_dash {
                 released = true;
                 break;
