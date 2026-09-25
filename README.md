@@ -1,8 +1,8 @@
 # honse-sim
 
 > **Modified fork.** Branch `ulc` is jalbarrang/torena-sim v0.13.0 plus the
-> Uma Legends Cup patch series (nineteen patches), applied between 19 and
-> 23 Sep 2026. Every change is its own commit above upstream's v0.13.0 tag
+> Uma Legends Cup patch series (forty-one patches), applied between 19 and
+> 24 Sep 2026. Every change is its own commit above upstream's v0.13.0 tag
 > commit `52f4c4a` (`git log 52f4c4a..ulc`), and each message carries the
 > rule it implements and the measurement that justified it. The series is
 > maintained as patch files in Steve6378/uma-sim-lab
